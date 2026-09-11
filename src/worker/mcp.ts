@@ -17,8 +17,10 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Accept, mcp-session-id, mcp-protocol-version, Last-Event-ID',
-    'Access-Control-Expose-Headers': 'Content-Type, mcp-session-id, mcp-protocol-version',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id, mcp-protocol-version, Last-Event-ID',
+    'Access-Control-Expose-Headers':
+      'Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id, mcp-protocol-version',
   };
 }
 
