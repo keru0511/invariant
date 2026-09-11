@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { handleMcpRequest, createMcpServer } from './mcp';
 
-describe('MCP Handler', () => {
-  it('creates an McpServer instance with domain.ping tool registered', () => {
+describe('MCP ハンドラー (/mcp)', () => {
+  it('domain.ping ツールが登録された McpServer インスタンスを生成する', () => {
     const server = createMcpServer();
     expect(server).toBeDefined();
   });
 
-  it('handles CORS OPTIONS preflight request with 204 and headers', async () => {
+  it('CORS OPTIONS プリフライトリクエストに対して 204 と適切なヘッダーを返却する', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'OPTIONS',
       headers: {
@@ -22,7 +22,7 @@ describe('MCP Handler', () => {
     expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
   });
 
-  it('handles initialize request over Streamable HTTP', async () => {
+  it('Streamable HTTP 経由での initialize リクエストを処理する', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'POST',
       headers: {
@@ -51,7 +51,7 @@ describe('MCP Handler', () => {
     expect(text).toContain('"protocolVersion":"2024-11-05"');
   });
 
-  it('exposes domain.ping in tools/list', async () => {
+  it('tools/list にて domain.ping ツールを公開する', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'POST',
       headers: {
@@ -72,10 +72,10 @@ describe('MCP Handler', () => {
     const text = await response.text();
     expect(text).toContain('event: message');
     expect(text).toContain('"name":"domain.ping"');
-    expect(text).toContain('Check domain connectivity and health');
+    expect(text).toContain('ドメインコアの疎通および健全性を確認');
   });
 
-  it('executes domain.ping via tools/call returning deterministic { ok: true }', async () => {
+  it('tools/call 経由で domain.ping を実行し、決定論的に { ok: true } を返却する', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'POST',
       headers: {
@@ -98,7 +98,7 @@ describe('MCP Handler', () => {
 
     const text = await response.text();
     expect(text).toContain('event: message');
-    // Verify JSON-RPC response contains { ok: true }
+    // JSON-RPC レスポンスに { ok: true } が含まれることを検証
     expect(text).toContain('{\\"ok\\":true}');
   });
 });

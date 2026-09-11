@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getDomainMetadata, ping } from './index';
 
-describe('Domain Core', () => {
-  it('returns valid domain metadata without external dependencies', () => {
+describe('Domain Core (ドメインコア)', () => {
+  it('外部依存なしに正常なドメインメタデータを返却する', () => {
     const metadata = getDomainMetadata();
     expect(metadata).toEqual({
       name: 'invariant-domain-core',
@@ -11,7 +11,7 @@ describe('Domain Core', () => {
     });
   });
 
-  it('evaluates ping deterministically returning { ok: true }', () => {
+  it('ping を決定論的に評価して { ok: true } を返却する', () => {
     const result = ping();
     expect(result).toEqual({ ok: true });
   });

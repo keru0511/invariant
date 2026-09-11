@@ -2,7 +2,7 @@ import { getDomainMetadata } from '../domain';
 import { handleMcpRequest } from './mcp';
 
 export interface Env {
-  // Bindings (e.g. KV, D1, environment variables) will be defined here
+  // Cloudflare Workers のバインディング（KV, D1, 環境変数など）をここで定義
 }
 
 export const handler: ExportedHandler<Env> = {

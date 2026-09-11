@@ -17,7 +17,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     'domain.ping',
-    'Check domain connectivity and health',
+    'ドメインコアの疎通および健全性を確認',
     async () => {
       const result = ping();
       return {
@@ -35,7 +35,7 @@ export function createMcpServer(): McpServer {
 }
 
 export async function handleMcpRequest(request: Request): Promise<Response> {
-  // Handle CORS preflight
+  // CORS プリフライトリクエストの処理
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -48,13 +48,13 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
   const server = createMcpServer();
   const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // Stateless Streamable HTTP
+    sessionIdGenerator: undefined, // ステートレス Streamable HTTP
   });
 
   await server.connect(transport);
   const response = await transport.handleRequest(request);
 
-  // Attach CORS headers to transport response
+  // レスポンスに CORS ヘッダーを付与
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(MCP_CORS_HEADERS)) {
     headers.set(key, value);

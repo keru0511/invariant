@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import handler from './index';
 
-describe('Worker', () => {
-  it('handles GET / with status ok and domain metadata', async () => {
+describe('Worker (Cloudflare Worker ハンドラー)', () => {
+  it('GET / に対し status ok とドメインメタデータを返却する', async () => {
     const request = new Request('http://localhost/');
     const env = {};
     const ctx = {
@@ -26,7 +26,7 @@ describe('Worker', () => {
     });
   });
 
-  it('handles GET /health', async () => {
+  it('GET /health を正常に処理する', async () => {
     const request = new Request('http://localhost/health');
     const env = {};
     const ctx = {
@@ -38,7 +38,7 @@ describe('Worker', () => {
     expect(response.status).toBe(200);
   });
 
-  it('returns 404 for unknown routes', async () => {
+  it('未定義のルートに対して 404 を返却する', async () => {
     const request = new Request('http://localhost/unknown');
     const env = {};
     const ctx = {
@@ -50,7 +50,7 @@ describe('Worker', () => {
     expect(response.status).toBe(404);
   });
 
-  it('returns 404 for non-GET requests to /health', async () => {
+  it('/health に対する GET 以外のリクエストに対して 404 を返却する', async () => {
     const request = new Request('http://localhost/health', { method: 'POST' });
     const env = {};
     const ctx = {
@@ -62,7 +62,7 @@ describe('Worker', () => {
     expect(response.status).toBe(404);
   });
 
-  it('routes /mcp to the MCP handler', async () => {
+  it('/mcp へのリクエストを MCP ハンドラーにルーティングする', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'OPTIONS',
       headers: { Origin: 'https://example.com' },

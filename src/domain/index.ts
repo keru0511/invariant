@@ -1,9 +1,9 @@
 /**
- * Invariant Domain Core
+ * Invariant ドメインコア
  *
- * This module is pure TypeScript: it MUST NOT depend on Cloudflare Workers,
- * MCP, or external HTTP libraries. All domain models, AST types, evaluation,
- * and business rules belong in this namespace.
+ * 本モジュールは純粋な TypeScript で実装されており、Cloudflare Workers や MCP、
+ * 外部 HTTP ライブラリに一切依存してはなりません。すべてのドメインモデル、
+ * AST 型定義、決定論的評価ロジック、ビジネスルールをこの名前空間に配置します。
  */
 
 export interface DomainMetadata {
