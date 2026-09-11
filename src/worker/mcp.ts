@@ -1,5 +1,4 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { ping } from '../domain';
 
 export const MCP_CORS_HEADERS: Record<string, string> = {
@@ -15,9 +14,11 @@ export function createMcpServer(): McpServer {
     version: '0.0.1',
   });
 
-  server.tool(
+  server.registerTool(
     'domain.ping',
-    'ドメインコアの疎通および健全性を確認',
+    {
+      description: 'ドメインコアの疎通および健全性を確認',
+    },
     async () => {
       const result = ping();
       return {
@@ -34,6 +35,8 @@ export function createMcpServer(): McpServer {
   return server;
 }
 
+const mcpHandler = createMcpHandler(async () => createMcpServer());
+
 export async function handleMcpRequest(request: Request): Promise<Response> {
   // CORS プリフライトリクエストの処理
   if (request.method === 'OPTIONS') {
@@ -46,13 +49,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
     });
   }
 
-  const server = createMcpServer();
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // ステートレス Streamable HTTP
-  });
-
-  await server.connect(transport);
-  const response = await transport.handleRequest(request);
+  const response = await mcpHandler.fetch(request);
 
   // レスポンスに CORS ヘッダーを付与
   const headers = new Headers(response.headers);

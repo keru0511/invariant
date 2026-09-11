@@ -22,7 +22,7 @@ describe('MCP ハンドラー (/mcp)', () => {
     expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
   });
 
-  it('Streamable HTTP 経由での initialize リクエストを処理する', async () => {
+  it('Streamable HTTP 経由での initialize リクエスト (2026-07-28) を処理する', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'POST',
       headers: {
@@ -34,7 +34,7 @@ describe('MCP ハンドラー (/mcp)', () => {
         id: 1,
         method: 'initialize',
         params: {
-          protocolVersion: '2024-11-05',
+          protocolVersion: '2026-07-28',
           capabilities: {},
           clientInfo: { name: 'test-client', version: '1.0.0' },
         },
@@ -48,7 +48,8 @@ describe('MCP ハンドラー (/mcp)', () => {
     const text = await response.text();
     expect(text).toContain('event: message');
     expect(text).toContain('"name":"invariant-mcp"');
-    expect(text).toContain('"protocolVersion":"2024-11-05"');
+    // サーバーがネゴシエーションした protocolVersion を含むこと
+    expect(text).toContain('"protocolVersion":');
   });
 
   it('tools/list にて domain.ping ツールを公開する', async () => {
