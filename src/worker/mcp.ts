@@ -1,12 +1,26 @@
-import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
+import {
+  McpServer,
+  createMcpHandler,
+  originValidationResponse,
+  localhostAllowedOrigins,
+} from '@modelcontextprotocol/server';
 import { ping } from '../domain';
 
-export const MCP_CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Accept, mcp-session-id, mcp-protocol-version, Last-Event-ID',
-  'Access-Control-Expose-Headers': 'Content-Type, mcp-session-id, mcp-protocol-version',
-};
+/**
+ * DNS Rebinding 対策のための許可 Origin ホスト名リスト
+ */
+export const ALLOWED_ORIGIN_HOSTNAMES: readonly string[] = [
+  ...localhostAllowedOrigins(),
+];
+
+export function getCorsHeaders(origin: string | null): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept, mcp-session-id, mcp-protocol-version, Last-Event-ID',
+    'Access-Control-Expose-Headers': 'Content-Type, mcp-session-id, mcp-protocol-version',
+  };
+}
 
 export function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -37,13 +51,25 @@ export function createMcpServer(): McpServer {
 
 const mcpHandler = createMcpHandler(async () => createMcpServer());
 
-export async function handleMcpRequest(request: Request): Promise<Response> {
+export async function handleMcpRequest(
+  request: Request,
+  allowedOrigins: readonly string[] = ALLOWED_ORIGIN_HOSTNAMES
+): Promise<Response> {
+  // DNS Rebinding 対策: Origin ヘッダーの検証 (不正な場合は 403 を返却)
+  const originRejection = originValidationResponse(request, [...allowedOrigins]);
+  if (originRejection) {
+    return originRejection;
+  }
+
+  const origin = request.headers.get('origin');
+  const corsHeaders = getCorsHeaders(origin);
+
   // CORS プリフライトリクエストの処理
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
-        ...MCP_CORS_HEADERS,
+        ...corsHeaders,
         'Access-Control-Max-Age': '86400',
       },
     });
@@ -53,7 +79,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
   // レスポンスに CORS ヘッダーを付与
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(MCP_CORS_HEADERS)) {
+  for (const [key, value] of Object.entries(corsHeaders)) {
     headers.set(key, value);
   }
 

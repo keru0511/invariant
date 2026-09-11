@@ -65,7 +65,7 @@ describe('Worker (Cloudflare Worker ハンドラー)', () => {
   it('/mcp へのリクエストを MCP ハンドラーにルーティングする', async () => {
     const request = new Request('http://localhost/mcp', {
       method: 'OPTIONS',
-      headers: { Origin: 'https://example.com' },
+      headers: { Origin: 'http://localhost:5173' },
     });
     const env = {};
     const ctx = {
