@@ -11,13 +11,13 @@ const ALLOWED_ORIGIN_HOSTNAMES = localhostAllowedOrigins();
 function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin || '*',
-    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers':
-      'Content-Type, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id',
+      'Content-Type, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name',
   };
 }
 
-export function createMcpServer(): McpServer {
+function createMcpServer(): McpServer {
   const server = new McpServer({
     name: 'invariant-mcp',
     version: '0.0.1',
@@ -45,7 +45,7 @@ export function createMcpServer(): McpServer {
 }
 
 const mcpHandler = createMcpHandler(
-  async () => createMcpServer(),
+  () => createMcpServer(),
   { legacy: 'reject' }
 );
 

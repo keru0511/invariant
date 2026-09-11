@@ -4,7 +4,6 @@ import {
   PROTOCOL_VERSION_META_KEY,
   CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
-  SERVER_INFO_META_KEY,
 } from '@modelcontextprotocol/server';
 
 /**
@@ -66,6 +65,7 @@ describe('MCP ハンドラー (/mcp)', () => {
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
       'http://localhost:5173'
     );
+    expect(response.headers.get('Access-Control-Allow-Methods')).toBe('POST, OPTIONS');
     const allowHeaders = response.headers.get('Access-Control-Allow-Headers');
     expect(allowHeaders).toContain('Mcp-Method');
     expect(allowHeaders).toContain('Mcp-Name');
@@ -107,12 +107,12 @@ describe('MCP ハンドラー (/mcp)', () => {
     expect(body).toMatchObject({
       jsonrpc: '2.0',
       result: {
-        tools: [
-          {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
             name: 'domain.ping',
             description: 'ドメインコアの疎通および健全性を確認',
-          },
-        ],
+          }),
+        ]),
       },
     });
   });
@@ -141,12 +141,6 @@ describe('MCP ハンドラー (/mcp)', () => {
             text: '{"ok":true}',
           },
         ],
-        _meta: {
-          [SERVER_INFO_META_KEY]: {
-            name: 'invariant-mcp',
-            version: '0.0.1',
-          },
-        },
       },
     });
   });

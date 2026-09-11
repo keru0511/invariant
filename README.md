@@ -32,6 +32,6 @@ npm test
 ## エンドポイント
 
 - `GET /` または `GET /health`: 健全性・サービスステータスを JSON で返却します。
-- `POST /mcp`（および `GET /mcp`, `OPTIONS /mcp`）: Streamable HTTP 形式の Model Context Protocol (MCP) エンドポイント。
+- `POST /mcp`（および `OPTIONS /mcp`）: 2026-07-28 Modern MCP (Streamable HTTP) エンドポイント。
   - **ツール**:
     - `domain.ping`: ドメインコアの疎通・健全性を確認し、決定論的に `{ ok: true }` を返却します。
