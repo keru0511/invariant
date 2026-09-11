@@ -49,4 +49,16 @@ describe('Worker', () => {
     const response = await handler.fetch!(request as any, env, ctx);
     expect(response.status).toBe(404);
   });
+
+  it('returns 404 for non-GET requests to /health', async () => {
+    const request = new Request('http://localhost/health', { method: 'POST' });
+    const env = {};
+    const ctx = {
+      waitUntil: () => {},
+      passThroughOnException: () => {},
+    } as unknown as ExecutionContext;
+
+    const response = await handler.fetch!(request as any, env, ctx);
+    expect(response.status).toBe(404);
+  });
 });
