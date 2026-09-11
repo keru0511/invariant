@@ -1,31 +1,37 @@
 # Invariant
 
-Deterministic domain evaluation and natural-language domain model authoring on Cloudflare Workers and MCP.
+Cloudflare Workers および MCP 上で動作する、決定論的ドメイン評価と自然言語によるドメインモデル作成基盤。
 
-## Project Structure
+## プロジェクト構成
 
 ```
 src/
-  domain/   # Pure domain core (no Cloudflare or MCP dependencies)
-  worker/   # Cloudflare Workers entry point and HTTP adapter
+  domain/   # 純粋なドメインコア (Cloudflare や MCP に非依存)
+  worker/   # Cloudflare Workers エントリーポイントおよび HTTP/MCP アダプター
 ```
 
-- **Domain Core (`src/domain/`)**: Pure TypeScript business logic and AST definitions, isolated from runtime and protocol details.
-- **Worker (`src/worker/`)**: Minimal Cloudflare Workers fetch handler without Hono or external HTTP frameworks.
+- **Domain Core (`src/domain/`)**: 純粋な TypeScript で実装されたビジネスロジックおよび AST 定義。ランタイムや通信プロトコルの詳細から完全に分離されています。
+- **Worker (`src/worker/`)**: 外部 HTTP フレームワーク（Hono など）を使用しない、最小限の Cloudflare Workers `fetch` ハンドラー。
 
-## Development
+## 開発コマンド
 
 ```bash
-# Install dependencies
+# 依存パッケージのインストール
 npm install
 
-# Start local Cloudflare Worker development server
+# Cloudflare Worker ローカル開発サーバーの起動
 npm run dev
 
-# Run TypeScript typecheck
+# TypeScript 型チェック
 npm run typecheck
 
-# Run test suite
+# テスト実行
 npm test
 ```
 
+## エンドポイント
+
+- `GET /` または `GET /health`: 健全性・サービスステータスを JSON で返却します。
+- `POST /mcp`（および `OPTIONS /mcp`）: 2026-07-28 Modern MCP (Streamable HTTP) エンドポイント。
+  - **ツール**:
+    - `domain.ping`: ドメインコアの疎通・健全性を確認し、決定論的に `{ ok: true }` を返却します。
