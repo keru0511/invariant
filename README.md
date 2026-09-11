@@ -29,3 +29,11 @@ npm run typecheck
 npm test
 ```
 
+## Endpoints
+
+- `GET /` or `GET /health`: Health and service status JSON.
+- `POST /mcp` (or `GET /mcp`, `OPTIONS /mcp`): Model Context Protocol (MCP) endpoint over Streamable HTTP.
+  - **Tools**:
+    - `domain.ping`: Returns `{ ok: true }` verifying domain connectivity.
+
+

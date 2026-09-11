@@ -61,4 +61,19 @@ describe('Worker', () => {
     const response = await handler.fetch!(request as any, env, ctx);
     expect(response.status).toBe(404);
   });
+
+  it('routes /mcp to the MCP handler', async () => {
+    const request = new Request('http://localhost/mcp', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://example.com' },
+    });
+    const env = {};
+    const ctx = {
+      waitUntil: () => {},
+      passThroughOnException: () => {},
+    } as unknown as ExecutionContext;
+
+    const response = await handler.fetch!(request as any, env, ctx);
+    expect(response.status).toBe(204);
+  });
 });

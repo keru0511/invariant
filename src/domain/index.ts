@@ -19,3 +19,12 @@ export function getDomainMetadata(): DomainMetadata {
     status: 'ready',
   };
 }
+
+export interface PingResult {
+  readonly ok: true;
+}
+
+export function ping(): PingResult {
+  return { ok: true };
+}
+
