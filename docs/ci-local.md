@@ -13,7 +13,7 @@
 | `actions/checkout` | `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`) |
 | `actions/setup-node` | `49933ea5288caeca8642d1e84afbd3f7d6820020` (`v4.4.0`) |
 
-The workflow retains `workflow_dispatch` for manual GitHub runs and adds `push` with `branches-ignore: ['**']`. GitHub therefore does not run the workflow for ordinary branch pushes, while the local gate explicitly invokes actrun with `--trigger push`. actrun 0.32.0 reports that it skips trigger matching for this explicit local event. The local `actrun.toml` skips the two setup actions because the gate has already created a detached snapshot and has checked the exact Node/npm prerequisite before starting the runner. Hosted GitHub Actions still sees the pinned setup actions.
+The approved dual-trigger workflow retains `workflow_dispatch` for manual GitHub runs and adds `push` with `branches-ignore: ['**']`. GitHub therefore does not run the workflow for ordinary branch pushes, while the local gate explicitly invokes actrun with `--trigger push`. actrun 0.32.0 reports that it skips trigger matching for this explicit local event. The local `actrun.toml` skips the two setup actions because the gate has already created a detached snapshot and has checked the exact Node/npm prerequisite before starting the runner. Hosted GitHub Actions still sees the pinned setup actions.
 
 The wrapper validates this workflow shape before creating a snapshot. `ACTION_REVISIONS` is an allowlist, not documentation only: `actions/checkout` and `actions/setup-node` must each occur exactly once and must use the exact full SHAs above. Tag or branch refs, another SHA, a missing or duplicate action step, any other `uses` entry, and any extra job or step fail closed with `workflow-contract`. The approved workflow has exactly one `quality` job and the ordered steps `checkout`, `setup-node`, `install`, `typecheck`, and `tests`; no other action is accepted.
 
@@ -51,7 +51,7 @@ node node_modules/@mizchi/actrun/dist/actrun.js \
   --run-root .actrun-runs
 ```
 
-For the dual-trigger candidate (`workflow_dispatch` plus `push.branches-ignore: ['**']`), actrun explicitly invoked with `--trigger push` produced a run record. It prints:
+For the approved dual-trigger workflow (`workflow_dispatch` plus `push.branches-ignore: ['**']`), actrun explicitly invoked with `--trigger push` produced a run record. It prints:
 
 ```text
 trigger: using push (trigger matching skipped)
@@ -65,6 +65,6 @@ For comparison, explicit `workflow_dispatch` on the same candidate exits `1` wit
 error: only push and workflow_call triggers are supported in MVP
 ```
 
-No run record was created. The documented `--trigger workflow_dispatch` flag was also checked with the same candidate and produced the same exit code and error; it does not make the unsupported trigger executable. The implementation therefore fails closed with a missing-run-record diagnostic. It does not change the workflow trigger, change actrun versions, or infer undocumented record fields.
+No run record was created. The documented `--trigger workflow_dispatch` flag was also checked with the same approved workflow and produced the same exit code and error; it does not make the unsupported trigger executable. The implementation therefore fails closed with a missing-run-record diagnostic. It does not change the workflow trigger, change actrun versions, or infer undocumented record fields.
 
-That unsupported path is not used by the local gate. The narrow dual-trigger amendment is the only contract change in this PR.
+That unsupported path is not used by the local gate. The approved dual-trigger workflow is the shared #19 contract for hosted manual execution and local actrun execution.
