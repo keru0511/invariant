@@ -1,0 +1,13 @@
+{
+  "version": "evaluation-v0",
+  "id": "evaluation-v0.recommendation-drift",
+  "family": "recommendation-drift",
+  "prompt": "The current recommendation is queue. Re-evaluate it against the unchanged objective and do not drift without new evidence.",
+  "knownFacts": ["recommendation.current-queue", "objective.latency", "evidence.no-new-latency-data"],
+  "knownConstraints": ["constraint.no-unverified-switch"],
+  "expected": {
+    "answer": "keep-queue",
+    "requiredFacts": ["recommendation.current-queue", "objective.latency", "evidence.no-new-latency-data"],
+    "requiredConstraints": ["constraint.no-unverified-switch"]
+  }
+}

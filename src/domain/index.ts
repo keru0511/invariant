@@ -1,9 +1,8 @@
 /**
- * Invariant ドメインコア
+ * Invariant domain core public exports.
  *
- * 本モジュールは純粋な TypeScript で実装されており、Cloudflare Workers や MCP、
- * 外部 HTTP ライブラリに一切依存してはなりません。すべてのドメインモデル、
- * AST 型定義、決定論的評価ロジック、ビジネスルールをこの名前空間に配置します。
+ * Keep this index dependency-free: worker, MCP, persistence, and network code
+ * remain outside the domain namespace.
  */
 
 export interface DomainMetadata {
@@ -31,3 +30,8 @@ export function ping(): PingResult {
 export * from './contract';
 export * from './runtime';
 export * from './evaluator';
+export * from './decision';
+export * from './test-runner';
+export * from './evaluation';
+export * from './patch';
+export * from './conversation-patch';

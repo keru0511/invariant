@@ -1,0 +1,11 @@
+{
+  "version": "evaluation-v0",
+  "fixtureSetId": "evaluation-fixtures-v0",
+  "cases": [
+    { "id": "evaluation-v0.exception", "family": "exception", "path": "cases/exception.json" },
+    { "id": "evaluation-v0.missing-fact", "family": "missing-fact", "path": "cases/missing-fact.json" },
+    { "id": "evaluation-v0.threshold", "family": "threshold", "path": "cases/threshold.json" },
+    { "id": "evaluation-v0.long-context-constraint", "family": "long-context-constraint", "path": "cases/long-context-constraint.json" },
+    { "id": "evaluation-v0.recommendation-drift", "family": "recommendation-drift", "path": "cases/recommendation-drift.json" }
+  ]
+}

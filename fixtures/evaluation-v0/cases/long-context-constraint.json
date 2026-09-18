@@ -1,0 +1,13 @@
+{
+  "version": "evaluation-v0",
+  "id": "evaluation-v0.long-context-constraint",
+  "family": "long-context-constraint",
+  "prompt": "Review the long policy context and recommend an option. The no-data-export constraint remains binding even when mentioned early.",
+  "knownFacts": ["option.queue-available", "option.direct-available", "data.classification.internal"],
+  "knownConstraints": ["constraint.no-data-export", "constraint.internal-only"],
+  "expected": {
+    "answer": "queue",
+    "requiredFacts": ["option.queue-available", "data.classification.internal"],
+    "requiredConstraints": ["constraint.no-data-export", "constraint.internal-only"]
+  }
+}
