@@ -27,3 +27,12 @@ storage, time, Worker APIs, or an LLM.
 The trace is derived only from the parsed function id, node ids, rule ids, and
 fixed traversal order. A direct call uses the stable provenance sentinel
 `fixtureId: "evaluation"`, because it does not have a golden-fixture id.
+
+## Stored example regression tests
+
+`src/domain/test-runner.ts` exposes `runTests(domain)`. It runs the stored #23
+golden examples through `evaluate`, preserving each example ID, source function
+ID, and fixture path in a per-example expected/actual report. Semantic matching
+includes result status, so `unresolved` is not collapsed into another
+`value: null` state. An empty explicitly supplied suite returns `status:
+"empty"`; it is not represented as coverage.
