@@ -3,6 +3,12 @@ interface WorkspaceRow {
   readonly created_at: string;
 }
 
+interface WorkspaceMembershipRow {
+  readonly workspace_id: string;
+  readonly principal_id: string;
+  readonly created_at: string;
+}
+
 interface DomainRow {
   readonly workspace_id: string;
   readonly id: string;
@@ -18,7 +24,7 @@ interface VersionRow {
   readonly published_at: string;
 }
 
-type Row = WorkspaceRow | DomainRow | VersionRow | { readonly present: 1 };
+type Row = WorkspaceRow | WorkspaceMembershipRow | DomainRow | VersionRow | { readonly present: 1 };
 
 function key(...values: string[]): string {
   return JSON.stringify(values);
@@ -67,6 +73,7 @@ class FakeD1PreparedStatement {
  */
 export class FakeD1Database {
   private workspaces = new Map<string, WorkspaceRow>();
+  private memberships = new Map<string, WorkspaceMembershipRow>();
   private domains = new Map<string, DomainRow>();
   private versions = new Map<string, VersionRow>();
   private failAfterStatement: number | undefined;
@@ -104,6 +111,7 @@ export class FakeD1Database {
   private clone(): FakeD1Database {
     const cloned = new FakeD1Database();
     cloned.workspaces = new Map(this.workspaces);
+    cloned.memberships = new Map(this.memberships);
     cloned.domains = new Map(this.domains);
     cloned.versions = new Map(this.versions);
     return cloned;
@@ -111,6 +119,7 @@ export class FakeD1Database {
 
   private copyFrom(source: FakeD1Database): void {
     this.workspaces = source.workspaces;
+    this.memberships = source.memberships;
     this.domains = source.domains;
     this.versions = source.versions;
   }
@@ -121,6 +130,10 @@ export class FakeD1Database {
 
   async first<T>(sql: string, values: readonly unknown[]): Promise<T | null> {
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized.includes('from workspace_memberships')) {
+      const row = this.memberships.get(key(String(values[0]), String(values[1])));
+      return (row ?? null) as T | null;
+    }
     if (normalized.includes('from domain_versions')) {
       const row = this.versions.get(key(String(values[0]), String(values[1]), String(values[2])));
       return (row ?? null) as T | null;
@@ -133,6 +146,18 @@ export class FakeD1Database {
     if (normalized.startsWith('insert into workspaces')) {
       const row: WorkspaceRow = { id: String(values[0]), created_at: String(values[1]) };
       this.workspaces.set(row.id, this.workspaces.get(row.id) ?? row);
+      return result();
+    }
+    if (normalized.startsWith('insert into workspace_memberships')) {
+      const row: WorkspaceMembershipRow = {
+        workspace_id: String(values[0]),
+        principal_id: String(values[1]),
+        created_at: String(values[2]),
+      };
+      if (!this.workspaces.has(row.workspace_id)) {
+        throw new Error('FOREIGN KEY constraint failed: workspace_memberships.workspace');
+      }
+      this.memberships.set(key(row.principal_id, row.workspace_id), row);
       return result();
     }
     if (normalized.startsWith('insert into domains')) {
@@ -168,5 +193,18 @@ export class FakeD1Database {
       return result();
     }
     throw new Error(`FakeD1Database does not support query: ${normalized}`);
+  }
+
+  /** Seed a server-side membership for authorization adapter tests. */
+  seedWorkspaceMembership(workspaceId: string, principalId: string, createdAt = '2026-09-18T00:00:00.000Z'): void {
+    this.workspaces.set(workspaceId, this.workspaces.get(workspaceId) ?? {
+      id: workspaceId,
+      created_at: createdAt,
+    });
+    this.memberships.set(key(principalId, workspaceId), {
+      workspace_id: workspaceId,
+      principal_id: principalId,
+      created_at: createdAt,
+    });
   }
 }

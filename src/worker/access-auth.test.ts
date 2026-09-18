@@ -160,7 +160,9 @@ describe('Cloudflare Access provider boundary', () => {
 
   it('rejects missing, forged, expired, wrong-issuer, and wrong-audience identities', async () => {
     const validToken = await createAccessToken();
-    const forgedToken = `${validToken.slice(0, -1)}${validToken.endsWith('A') ? 'B' : 'A'}`;
+    const [encodedHeader, encodedPayload, signature] = validToken.split('.');
+    const forgedSignature = `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`;
+    const forgedToken = `${encodedHeader}.${encodedPayload}.${forgedSignature}`;
 
     await expectUnauthorized(createModernPingRequest());
     await expectUnauthorized(createModernPingRequest(forgedToken));
