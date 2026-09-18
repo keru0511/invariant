@@ -21,12 +21,18 @@ The following checks are maintained with this implementation:
 
 | Command or scenario | Result |
 | --- | --- |
-| npm test | exit 0; 56 passed and 2 skipped (the two Node 22-only #19 tests) |
+| npm test | exit 0; 58 passed |
 | npm run typecheck | exit 0 |
-| npm run hooks:install, repeated | exit 0; configured, then already configured |
-| temporary repo: first and later same-branch pushes | covered by hook integration tests |
-| temporary bare remote: failing gate leaves remote SHA unchanged | covered by hook integration tests |
-| repeated install and unrelated local/global hook config | covered by installer tests |
-| linked worktree root discovery | covered by installer/hook tests |
-| tag/delete/multiple-update/unsupported refspecs | rejected without starting the gate |
-| npm run ci:local | exit 1 as expected: local runtime is Node 24.19.0, while #19 requires Node 22.19.0 |
+| npm run hooks:install, repeated | exit 0 both times; already configured both times in this checkout; fixture covers configure-then-idempotent |
+| npm run ci:local | exit 0; CI/quality install, typecheck, tests and run record passed |
+| npm run test:ci-gate | exit 0; positive, type-error, and test-failure disposable smoke cases matched expected results |
+| temporary repo: first and later same-branch pushes | passed in integration tests; gate called once per push |
+| temporary bare remote: failing gate leaves remote SHA unchanged | passed in integration tests |
+| repeated install and unrelated local/global hook config | passed in installer tests |
+| linked worktree root discovery | passed in installer tests |
+| tag/delete/multiple-update/unsupported refspecs | rejected before the gate; passed parser/no-gate tests |
+
+No required command or acceptance scenario is being treated as PASS without an
+observed result. A separate `npm ci` command was not run in this final pass;
+the existing installed dependencies and the real #19 gate completed
+successfully.
