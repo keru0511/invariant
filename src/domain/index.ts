@@ -31,3 +31,4 @@ export function ping(): PingResult {
 export * from './contract';
 export * from './runtime';
 export * from './patch';
+export * from './conversation-patch';
