@@ -55,6 +55,9 @@ export const DOMAIN_PARSE_ERROR_CODES = [
   'INVALID_REFERENCE',
   'TYPE_MISMATCH',
   'CIRCULAR_REFERENCE',
+  'INVALID_ARITY',
+  'INVALID_SCOPE',
+  'INVALID_EXPECTATION',
 ] as const;
 
 export type DomainParseErrorCode = (typeof DOMAIN_PARSE_ERROR_CODES)[number];
@@ -67,21 +70,29 @@ export interface DomainParseError {
   readonly actual?: string;
 }
 
+export interface DomainParseFailure {
+  readonly ok: false;
+  readonly error: DomainParseError;
+  readonly errors: readonly DomainParseError[];
+}
+
 export type DomainParseResult<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: DomainParseError };
+  | DomainParseFailure;
 
 export class DomainValidationError extends Error {
   readonly name = 'DomainValidationError';
   readonly code: DomainParseErrorCode;
   readonly path: string;
   readonly error: DomainParseError;
+  readonly errors: readonly DomainParseError[];
 
-  constructor(error: DomainParseError) {
+  constructor(error: DomainParseError, errors: readonly DomainParseError[] = [error]) {
     super(error.code + ' at ' + error.path + ': ' + error.message);
     this.code = error.code;
     this.path = error.path;
     this.error = error;
+    this.errors = Object.freeze([...errors]);
   }
 }
 
@@ -142,8 +153,11 @@ function makeError(
   return Object.freeze(error);
 }
 
-function failure<T = never>(error: DomainParseError): DomainParseResult<T> {
-  return Object.freeze({ ok: false as const, error });
+function failure<T = never>(
+  error: DomainParseError,
+  errors: readonly DomainParseError[] = [error],
+): DomainParseResult<T> {
+  return Object.freeze({ ok: false as const, error, errors: Object.freeze([...errors]) });
 }
 
 function success<T>(value: T): DomainParseResult<T> {
@@ -152,7 +166,7 @@ function success<T>(value: T): DomainParseResult<T> {
 
 function isFailure<T>(
   result: DomainParseResult<T>,
-): result is { readonly ok: false; readonly error: DomainParseError } {
+): result is DomainParseFailure {
   return !result.ok;
 }
 
@@ -1240,7 +1254,418 @@ export function parseExpectedResult(
   }));
 }
 
-export function parseGoldenFixture(value: unknown): DomainParseResult<DomainGoldenFixture> {
+type RuntimeValueType = DomainInputType | 'null' | 'missing' | 'unknown';
+
+interface RuntimeEvaluation {
+  readonly state: 'value' | 'unresolved' | 'error';
+  readonly value?: boolean | number | string | null;
+  readonly type?: RuntimeValueType;
+  readonly errors: readonly DomainError[];
+  readonly unresolvedPaths: readonly string[];
+}
+
+function runtimeValueType(value: unknown): RuntimeValueType {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return typeof value as DomainInputType;
+  }
+  return 'unknown';
+}
+
+function readInputValue(input: DomainJsonObject, path: string): { readonly found: boolean; readonly value?: unknown } {
+  let current: unknown = input;
+  for (const segment of path.split('.')) {
+    if (!isRecord(current) || !hasOwn(current, segment)) return { found: false };
+    current = current[segment];
+  }
+  return { found: true, value: current };
+}
+
+function evaluateExpression(
+  expression: DomainExpression,
+  input: DomainJsonObject,
+  inputTypes: ReadonlyMap<string, DomainInputType>,
+): RuntimeEvaluation {
+  if (expression.kind === 'literal') {
+    return {
+      state: 'value',
+      value: expression.value,
+      type: runtimeValueType(expression.value),
+      errors: [],
+      unresolvedPaths: [],
+    };
+  }
+
+  if (expression.kind === 'input') {
+    const observed = readInputValue(input, expression.path);
+    if (!observed.found) {
+      return {
+        state: 'unresolved',
+        errors: [],
+        unresolvedPaths: [expression.path],
+      };
+    }
+    const observedType = runtimeValueType(observed.value);
+    const expectedType = inputTypes.get(expression.path);
+    if (expectedType !== undefined && observedType !== expectedType) {
+      return {
+        state: 'error',
+        errors: [{
+          code: 'TYPE_MISMATCH',
+          message: "Expected " + expectedType + " at '" + expression.path + "', got " + observedType + '.',
+          path: expression.path,
+          nodeId: expression.id,
+        }],
+        unresolvedPaths: [],
+      };
+    }
+    return {
+      state: 'value',
+      value: observed.value as boolean | number | string,
+      type: observedType,
+      errors: [],
+      unresolvedPaths: [],
+    };
+  }
+
+  if (expression.kind === 'not') {
+    const operand = evaluateExpression(expression.operand, input, inputTypes);
+    if (operand.state !== 'value') return operand;
+    if (typeof operand.value !== 'boolean') {
+      return {
+        state: 'error',
+        errors: [{
+          code: 'TYPE_MISMATCH',
+          message: "Expected boolean for 'not' at '" + expression.id + "'.",
+          nodeId: expression.operand.id,
+        }],
+        unresolvedPaths: [],
+      };
+    }
+    return { state: 'value', value: !operand.value, type: 'boolean', errors: [], unresolvedPaths: [] };
+  }
+
+  if (expression.kind === 'compare') {
+    const left = evaluateExpression(expression.left, input, inputTypes);
+    const right = evaluateExpression(expression.right, input, inputTypes);
+    if (left.state === 'error') return left;
+    if (right.state === 'error') return right;
+    const unresolvedPaths = [...left.unresolvedPaths, ...right.unresolvedPaths];
+    if (left.state === 'unresolved' || right.state === 'unresolved') {
+      return { state: 'unresolved', errors: [], unresolvedPaths };
+    }
+    const leftType = left.type ?? runtimeValueType(left.value);
+    const rightType = right.type ?? runtimeValueType(right.value);
+    const comparable = expression.operator === 'eq'
+      ? leftType === rightType || leftType === 'null' || rightType === 'null'
+      : leftType === 'number' && rightType === 'number';
+    if (!comparable) {
+      return {
+        state: 'error',
+        errors: [{
+          code: 'TYPE_MISMATCH',
+          message: "Operands for '" + expression.operator + "' at '" + expression.id + "' have incompatible types.",
+          nodeId: expression.id,
+        }],
+        unresolvedPaths: [],
+      };
+    }
+    let result: boolean;
+    if (expression.operator === 'eq') result = left.value === right.value;
+    else if (expression.operator === 'lt') result = (left.value as number) < (right.value as number);
+    else if (expression.operator === 'lte') result = (left.value as number) <= (right.value as number);
+    else if (expression.operator === 'gt') result = (left.value as number) > (right.value as number);
+    else result = (left.value as number) >= (right.value as number);
+    return { state: 'value', value: result, type: 'boolean', errors: [], unresolvedPaths: [] };
+  }
+
+  const operands = expression.operands.map((operand) => evaluateExpression(operand, input, inputTypes));
+  const firstError = operands.find((operand) => operand.state === 'error');
+  if (firstError) return firstError;
+  const hasUnresolved = operands.some((operand) => operand.state === 'unresolved');
+  const values = operands.map((operand) => operand.value === true);
+  const result = expression.operator === 'and' ? values.every(Boolean) : values.some(Boolean);
+  if ((expression.operator === 'and' && !result) || (expression.operator === 'or' && result)) {
+    return { state: 'value', value: result, type: 'boolean', errors: [], unresolvedPaths: [] };
+  }
+  if (hasUnresolved) {
+    return {
+      state: 'unresolved',
+      errors: [],
+      unresolvedPaths: operands.flatMap((operand) => operand.unresolvedPaths),
+    };
+  }
+  return { state: 'value', value: result, type: 'boolean', errors: [], unresolvedPaths: [] };
+}
+
+function evaluateFunction(
+  domainFunction: DomainFunction,
+  input: DomainJsonObject,
+): { readonly status: DomainResultStatus; readonly value: boolean | null; readonly matchedRuleIds: readonly string[]; readonly unresolvedPaths: readonly string[]; readonly errors: readonly DomainError[] } {
+  const inputTypes = new Map(domainFunction.inputs.map((input) => [input.path, input.type]));
+  const candidates: Array<{ readonly rule: DomainRule; readonly result: RuntimeEvaluation }> = [];
+  for (const rule of domainFunction.policy.rules) {
+    const result = evaluateExpression(rule.when, input, inputTypes);
+    if (result.state === 'error') {
+      return { status: 'error', value: null, matchedRuleIds: [], unresolvedPaths: [], errors: result.errors };
+    }
+    if (result.state === 'value' && result.value === true) candidates.push({ rule, result });
+    if (result.state === 'unresolved') candidates.push({ rule, result });
+  }
+  if (candidates.length === 0) {
+    const status = domainFunction.policy.defaultStatus;
+    return { status, value: status === 'allow' ? true : status === 'deny' ? false : null, matchedRuleIds: [], unresolvedPaths: [], errors: [] };
+  }
+  const highestPriority = Math.max(...candidates.map((candidate) => candidate.rule.priority));
+  const highest = candidates.filter((candidate) => candidate.rule.priority === highestPriority);
+  const unresolved = highest.filter((candidate) => candidate.result.state === 'unresolved');
+  if (unresolved.length > 0) {
+    const unresolvedPaths = [...new Set(unresolved.flatMap((candidate) => candidate.result.unresolvedPaths))];
+    const errors = unresolvedPaths.map((path) => {
+      const candidate = unresolved.find((item) => item.result.unresolvedPaths.includes(path));
+      const inputNode = candidate ? findInputNode(candidate.rule.when, path) : undefined;
+      return {
+        code: 'MISSING_INPUT' as const,
+        message: "Input '" + path + "' is absent.",
+        path,
+        ...(inputNode ? { nodeId: inputNode.id } : {}),
+      };
+    });
+    return { status: 'unresolved', value: null, matchedRuleIds: [], unresolvedPaths, errors };
+  }
+  const matchedRuleIds = highest.map((candidate) => candidate.rule.id);
+  const decisions = new Set(highest.map((candidate) => candidate.rule.then));
+  if (decisions.size > 1) {
+    return {
+      status: 'conflict',
+      value: null,
+      matchedRuleIds,
+      unresolvedPaths: [],
+      errors: [{
+        code: 'RULE_CONFLICT',
+        message: 'Rules at the highest priority disagree.',
+        ruleIds: matchedRuleIds,
+      }],
+    };
+  }
+  const status = highest[0].rule.then;
+  return { status, value: status === 'allow', matchedRuleIds, unresolvedPaths: [], errors: [] };
+}
+
+function findInputNode(expression: DomainExpression, path: string): DomainExpression | undefined {
+  if (expression.kind === 'input') return expression.path === path ? expression : undefined;
+  if (expression.kind === 'compare') return findInputNode(expression.left, path) ?? findInputNode(expression.right, path);
+  if (expression.kind === 'logical') {
+    for (const operand of expression.operands) {
+      const found = findInputNode(operand, path);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (expression.kind === 'not') return findInputNode(expression.operand, path);
+  return undefined;
+}
+
+function collectInputLeaves(value: unknown, path: string, output: Array<{ readonly path: string; readonly value: unknown }>): void {
+  if (!isRecord(value)) {
+    output.push({ path, value });
+    return;
+  }
+  for (const key of Object.keys(value).sort()) {
+    collectInputLeaves(value[key], path ? path + '.' + key : key, output);
+  }
+}
+
+function semanticError(
+  code: DomainParseErrorCode,
+  path: string,
+  message: string,
+): DomainParseError {
+  return makeError(code, path, message);
+}
+
+function stableErrors(errors: readonly DomainParseError[]): readonly DomainParseError[] {
+  const unique = new Map<string, DomainParseError>();
+  for (const error of errors) {
+    const key = JSON.stringify([error.code, error.path, error.message, error.expected, error.actual]);
+    unique.set(key, error);
+  }
+  return Object.freeze([...unique.values()].sort((left, right) =>
+    left.path.localeCompare(right.path) || left.code.localeCompare(right.code) || left.message.localeCompare(right.message),
+  ));
+}
+
+function resolveFunctionContext(value: unknown): DomainParseResult<DomainFunction> {
+  if (isRecord(value) && value.kind === 'function-catalog') {
+    const domain = parseDomain(value);
+    if (isFailure(domain)) return domain;
+    if (domain.value.functions.length !== 1) {
+      return failure(semanticError('INVALID_ARITY', '$.functions', 'A fixture validator requires exactly one function when given a catalog.'));
+    }
+    return success(domain.value.functions[0]);
+  }
+  return parseFunction(value);
+}
+
+function validateParsedFixture(
+  fixture: DomainGoldenFixture,
+  domainFunction: DomainFunction,
+): DomainParseResult<DomainGoldenFixture> {
+  const errors: DomainParseError[] = [];
+  const knownRules = new Set(domainFunction.policy.rules.map((rule) => rule.id));
+  const knownNodes = new Set<string>();
+  const walk = (expression: DomainExpression): void => {
+    knownNodes.add(expression.id);
+    if (expression.kind === 'compare') {
+      walk(expression.left);
+      walk(expression.right);
+    } else if (expression.kind === 'logical') {
+      expression.operands.forEach(walk);
+    } else if (expression.kind === 'not') {
+      walk(expression.operand);
+    }
+  };
+  for (const rule of domainFunction.policy.rules) walk(rule.when);
+
+  if (fixture.functionId !== domainFunction.id) {
+    errors.push(semanticError('INVALID_REFERENCE', 'functionId', "Function '" + fixture.functionId + "' is not the validated function."));
+  }
+  if (fixture.expected.provenance.fixtureId !== fixture.id) {
+    errors.push(semanticError('INVALID_EXPECTATION', 'expected.provenance.fixtureId', 'Provenance fixtureId must match the fixture id.'));
+  }
+  if (fixture.expected.provenance.functionId !== domainFunction.id) {
+    errors.push(semanticError('INVALID_EXPECTATION', 'expected.provenance.functionId', 'Provenance functionId must match the function id.'));
+  }
+  if (fixture.expected.provenance.policyId !== domainFunction.policy.id) {
+    errors.push(semanticError('INVALID_EXPECTATION', 'expected.provenance.policyId', 'Provenance policyId must match the function policy id.'));
+  }
+
+  const declaredInputs = new Map(domainFunction.inputs.map((input) => [input.path, input]));
+  const inputLeaves: Array<{ readonly path: string; readonly value: unknown }> = [];
+  collectInputLeaves(fixture.input, '', inputLeaves);
+  for (const leaf of inputLeaves) {
+    const declaration = declaredInputs.get(leaf.path);
+    if (!declaration) {
+      errors.push(semanticError('INVALID_SCOPE', 'input.' + leaf.path, "Input path '" + leaf.path + "' is outside the function scope."));
+      continue;
+    }
+    const actual = runtimeValueType(leaf.value);
+    if (actual !== declaration.type) {
+      if (fixture.category !== 'invalid' || fixture.expected.status !== 'error') {
+        errors.push(makeError(
+          'TYPE_MISMATCH',
+          'input.' + leaf.path,
+          "Expected " + declaration.type + " at '" + leaf.path + "', got " + actual + '.',
+          declaration.type,
+          actual,
+        ));
+      }
+    }
+  }
+  if (inputLeaves.length > declaredInputs.size) {
+    errors.push(semanticError('INVALID_ARITY', 'input', 'Fixture supplies more arguments than the function declares.'));
+  }
+  if (fixture.expected.status !== 'unresolved' && fixture.expected.status !== 'error') {
+    for (const declaration of domainFunction.inputs) {
+      if (!readInputValue(fixture.input, declaration.path).found) {
+        errors.push(semanticError('INVALID_ARITY', 'input.' + declaration.path, "Required input '" + declaration.path + "' is missing."));
+      }
+    }
+  }
+
+  for (const id of fixture.expected.matchedRuleIds) {
+    if (!knownRules.has(id)) errors.push(semanticError('INVALID_REFERENCE', 'expected.matchedRuleIds', "Unknown rule '" + id + "'."));
+  }
+  for (const error of fixture.expected.errors) {
+    if (error.nodeId && !knownNodes.has(error.nodeId)) errors.push(semanticError('INVALID_REFERENCE', 'expected.errors', "Unknown node '" + error.nodeId + "'."));
+    for (const ruleId of error.ruleIds ?? []) {
+      if (!knownRules.has(ruleId)) errors.push(semanticError('INVALID_REFERENCE', 'expected.errors', "Unknown rule '" + ruleId + "'."));
+    }
+  }
+  for (const event of fixture.expected.trace) {
+    if (event.nodeId && !knownNodes.has(event.nodeId)) errors.push(semanticError('INVALID_REFERENCE', 'expected.trace', "Unknown node '" + event.nodeId + "'."));
+    if (event.ruleId && !knownRules.has(event.ruleId)) errors.push(semanticError('INVALID_REFERENCE', 'expected.trace', "Unknown rule '" + event.ruleId + "'."));
+  }
+  for (const inputPath of fixture.expected.provenance.inputPaths) {
+    if (!declaredInputs.has(inputPath)) errors.push(semanticError('INVALID_REFERENCE', 'expected.provenance.inputPaths', "Unknown input path '" + inputPath + "'."));
+  }
+  for (const ruleId of fixture.expected.provenance.ruleIds) {
+    if (!knownRules.has(ruleId)) errors.push(semanticError('INVALID_REFERENCE', 'expected.provenance.ruleIds', "Unknown rule '" + ruleId + "'."));
+  }
+
+  const evaluation = evaluateFunction(domainFunction, fixture.input);
+  if (fixture.expected.status !== evaluation.status) errors.push(semanticError('INVALID_EXPECTATION', 'expected.status', "Expected status '" + fixture.expected.status + "' does not match evaluated status '" + evaluation.status + "'."));
+  if (fixture.expected.value !== evaluation.value) errors.push(semanticError('INVALID_EXPECTATION', 'expected.value', 'Expected value does not match the evaluated status.'));
+  if (JSON.stringify(fixture.expected.matchedRuleIds) !== JSON.stringify(evaluation.matchedRuleIds)) errors.push(semanticError('INVALID_EXPECTATION', 'expected.matchedRuleIds', 'Expected matched rules do not match evaluation order.'));
+  if (JSON.stringify(fixture.expected.unresolvedPaths) !== JSON.stringify(evaluation.unresolvedPaths)) errors.push(semanticError('INVALID_EXPECTATION', 'expected.unresolvedPaths', 'Expected unresolved paths do not match evaluation.'));
+  if (JSON.stringify(fixture.expected.errors.map((item) => ({ code: item.code, path: item.path, nodeId: item.nodeId, ruleIds: item.ruleIds }))) !== JSON.stringify(evaluation.errors.map((item) => ({ code: item.code, path: item.path, nodeId: item.nodeId, ruleIds: item.ruleIds })))) {
+    errors.push(semanticError('INVALID_EXPECTATION', 'expected.errors', 'Expected errors do not match evaluation.'));
+  }
+  const categoryStatus: Record<DomainFixtureCategory, readonly DomainResultStatus[]> = {
+    valid: ['allow', 'deny'],
+    boundary: ['allow', 'deny'],
+    unresolved: ['unresolved'],
+    conflict: ['conflict'],
+    invalid: ['error'],
+  };
+  if (!categoryStatus[fixture.category].includes(fixture.expected.status)) {
+    errors.push(semanticError('INVALID_EXPECTATION', 'category', "Fixture category '" + fixture.category + "' does not match expected status '" + fixture.expected.status + "'."));
+  }
+  if (errors.length > 0) {
+    const ordered = stableErrors(errors);
+    return failure(ordered[0], ordered);
+  }
+  return success(fixture);
+}
+
+export function validateGoldenFixture(
+  value: unknown,
+  domain: unknown,
+): DomainParseResult<DomainGoldenFixture> {
+  const fixture = parseGoldenFixture(value);
+  if (isFailure(fixture)) return fixture;
+  const domainFunction = resolveFunctionContext(domain);
+  if (isFailure(domainFunction)) return domainFunction;
+  return validateParsedFixture(fixture.value, domainFunction.value);
+}
+
+export function validateDomainFixtures(
+  domain: unknown,
+  values: readonly unknown[],
+): DomainParseResult<readonly DomainGoldenFixture[]> {
+  const parsedDomain = parseDomain(domain);
+  if (isFailure(parsedDomain)) return parsedDomain;
+  const fixtures: DomainGoldenFixture[] = [];
+  const fixtureIds = new Set<string>();
+  const errors: DomainParseError[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const parsed = parseGoldenFixture(values[index]);
+    if (isFailure(parsed)) {
+      errors.push(...parsed.errors);
+      continue;
+    }
+    if (fixtureIds.has(parsed.value.id)) {
+      errors.push(semanticError('DUPLICATE_ID', 'fixtures[' + index + '].id', "Fixture identifier '" + parsed.value.id + "' is declared more than once."));
+      continue;
+    }
+    fixtureIds.add(parsed.value.id);
+    const domainFunction = parsedDomain.value.functions.find((item) => item.id === parsed.value.functionId);
+    if (!domainFunction) {
+      errors.push(semanticError('INVALID_REFERENCE', 'fixtures[' + index + '].functionId', "Function '" + parsed.value.functionId + "' is not declared."));
+      continue;
+    }
+    const validated = validateParsedFixture(parsed.value, domainFunction);
+    if (isFailure(validated)) errors.push(...validated.errors);
+    else fixtures.push(validated.value);
+  }
+  if (errors.length > 0) {
+    const ordered = stableErrors(errors);
+    return failure(ordered[0], ordered);
+  }
+  return success(Object.freeze(fixtures));
+}
+
+export function parseGoldenFixture(value: unknown, domain?: unknown): DomainParseResult<DomainGoldenFixture> {
   const rootPath = '$';
   const record = readRecord(value, rootPath);
   if (isFailure(record)) return record;
@@ -1297,7 +1722,7 @@ export function parseGoldenFixture(value: unknown): DomainParseResult<DomainGold
     childPath(rootPath, 'expected'),
   );
   if (isFailure(expected)) return expected;
-  return success(Object.freeze({
+  const parsed = success(Object.freeze({
     id: id.value,
     kind: 'golden-evaluation' as const,
     contractVersion: DOMAIN_CONTRACT_VERSION,
@@ -1307,6 +1732,9 @@ export function parseGoldenFixture(value: unknown): DomainParseResult<DomainGold
     input: inputValue.value as DomainJsonObject,
     expected: expected.value,
   }));
+  if (domain === undefined) return parsed;
+  if (isFailure(parsed)) return parsed;
+  return validateGoldenFixture(parsed.value, domain);
 }
 
 function parseManifestEntry(
@@ -1455,7 +1883,7 @@ function deepFreeze<T>(value: T): T {
 
 export function unwrapDomainParseResult<T>(result: DomainParseResult<T>): T {
   if (result.ok) return result.value;
-  throw new DomainValidationError(result.error);
+  throw new DomainValidationError(result.error, result.errors);
 }
 
 export function parseFunctionOrThrow(value: unknown): DomainFunction {
