@@ -147,11 +147,44 @@ describe('workflow contract', () => {
     expect(validateWorkflowDefinition(source)).toBe(true);
   });
 
-  it('rejects workflow_dispatch-only and unfiltered push workflows', async () => {
+  it('requires PRs targeting main while retaining the inert push trigger', async () => {
     const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     expectGateError(() => validateWorkflowDefinition(source.replace("  push:\n    branches-ignore:\n      - '**'\n", '')), 'workflow-contract');
     expectGateError(
       () => validateWorkflowDefinition(source.replace("      - '**'", "      - main")),
+      'workflow-contract',
+    );
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace("  pull_request:\n    branches:\n      - main\n", '')),
+      'workflow-contract',
+    );
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace("  pull_request:\n    branches:\n      - main", "  pull_request:\n    branches:\n      - develop")),
+      'workflow-contract',
+    );
+  });
+
+  it('requires read-only permissions, cancellation, timeout, and npm caching', async () => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    expect(source).toContain('  contents: read');
+    expect(source).toContain('group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}');
+    expect(source).toContain('cancel-in-progress: true');
+    expect(source).toContain('timeout-minutes: 10');
+    expect(source).toContain('cache: npm');
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace('  contents: read', '  contents: write')),
+      'workflow-contract',
+    );
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace('cancel-in-progress: true', 'cancel-in-progress: false')),
+      'workflow-contract',
+    );
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace('timeout-minutes: 10', 'timeout-minutes: 0')),
+      'workflow-contract',
+    );
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace('cache: npm', 'cache: yarn')),
       'workflow-contract',
     );
   });

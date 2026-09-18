@@ -124,7 +124,7 @@ export function validateWorkflowDefinition(source) {
     workflowContractError('workflow name must be CI');
   }
 
-  const triggerBlock = source.match(/^on:\s*\n([\s\S]*?)(?=^jobs:\s*$)/m)?.[1] ?? '';
+  const triggerBlock = source.match(/^on:\s*\n([\s\S]*?)(?=^(?:permissions|concurrency|jobs):\s*$)/m)?.[1] ?? '';
   const normalizedTrigger = triggerBlock
     .trim()
     .replace(/\r\n/g, '\n')
@@ -134,9 +134,34 @@ export function validateWorkflowDefinition(source) {
     'push:',
     '  branches-ignore:',
     "    - '**'",
+    'pull_request:',
+    '  branches:',
+    '    - main',
   ].join('\n');
   if (normalizedTrigger !== expectedTrigger) {
-    workflowContractError("workflow triggers must be workflow_dispatch plus push with branches-ignore ['**']");
+    workflowContractError("workflow triggers must retain workflow_dispatch plus inert push branches-ignore ['**'] and add pull_request branches [main]");
+  }
+
+  const permissionsBlock = source.match(/^permissions:\s*\n([\s\S]*?)(?=^(?:concurrency|jobs):\s*$)/m)?.[1] ?? '';
+  const normalizedPermissions = permissionsBlock
+    .trim()
+    .replace(/\r\n/g, '\n')
+    .replace(/^ {2}/gm, '');
+  if (normalizedPermissions !== 'contents: read') {
+    workflowContractError('workflow permissions must be read-only contents: read');
+  }
+
+  const concurrencyBlock = source.match(/^concurrency:\s*\n([\s\S]*?)(?=^jobs:\s*$)/m)?.[1] ?? '';
+  const normalizedConcurrency = concurrencyBlock
+    .trim()
+    .replace(/\r\n/g, '\n')
+    .replace(/^ {2}/gm, '');
+  const expectedConcurrency = [
+    'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+    'cancel-in-progress: true',
+  ].join('\n');
+  if (normalizedConcurrency !== expectedConcurrency) {
+    workflowContractError('workflow concurrency must group by workflow and pull request number/ref with cancellation enabled');
   }
 
   const workflowLines = source.replace(/\r\n/g, '\n').split('\n');
@@ -158,6 +183,9 @@ export function validateWorkflowDefinition(source) {
   const qualityJobLines = workflowLines.slice(qualityJob.index, qualityJobEnd);
   if (!qualityJobLines.includes('    name: quality')) {
     workflowContractError('workflow job quality must have name quality');
+  }
+  if (!qualityJobLines.includes('    timeout-minutes: 10')) {
+    workflowContractError('workflow job quality must have a 10 minute timeout');
   }
   if (qualityJobLines.filter((line) => line === '    steps:').length !== 1) {
     workflowContractError('workflow job quality must define exactly one steps block');
@@ -197,6 +225,9 @@ export function validateWorkflowDefinition(source) {
       }
       if (runLines.length > 0) {
         workflowContractError(`${step.id} may not contain a run entry`);
+      }
+      if (step.id === 'setup-node' && !stepLines.includes('          cache: npm')) {
+        workflowContractError('setup-node must enable the npm dependency cache');
       }
     } else {
       if (usesLines.length > 0) {
