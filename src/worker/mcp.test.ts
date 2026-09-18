@@ -354,13 +354,14 @@ describe('MCP ハンドラー (/mcp)', () => {
     ]);
   });
 
-  it('AC: domain.validate returns a successful deterministic validation report for the exact stored version', async () => {
+  it.each(['domain.describe', 'domain.validate'] as const)('AC: %s repeated calls are deterministic and read-only', async (toolName) => {
     const repository = createFakeWorkspaceRepository();
+    const beforeModel = JSON.stringify(parsedCatalog);
     const request = () => createModernRequest({
       method: 'tools/call',
-      name: 'domain.validate',
+      name: toolName,
       params: {
-        name: 'domain.validate',
+        name: toolName,
         arguments: {
           workspace: 'workspace-a',
           domain: 'orders',
@@ -377,18 +378,28 @@ describe('MCP ハンドラー (/mcp)', () => {
       workspaceRepository: repository,
     }));
 
-    expect(first).toMatchObject({
-      status: 'valid',
-      ok: true,
-      valid: true,
-      workspace: 'workspace-a',
-      domain: 'orders',
-      version: 'v1',
-      contractVersion: 'domain-v0',
-      errors: [],
-    });
+    expect(first).toMatchObject(toolName === 'domain.describe'
+      ? {
+        status: 'ok',
+        ok: true,
+        workspace: 'workspace-a',
+        domain: 'orders',
+        version: 'v1',
+        contractVersion: 'domain-v0',
+      }
+      : {
+        status: 'valid',
+        ok: true,
+        valid: true,
+        workspace: 'workspace-a',
+        domain: 'orders',
+        version: 'v1',
+        contractVersion: 'domain-v0',
+        errors: [],
+      });
     expect(second).toEqual(first);
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+    expect(JSON.stringify(parsedCatalog)).toBe(beforeModel);
     expect(repository.calls).toEqual([
       { operation: 'authorize', workspaceId: 'workspace-a' },
       { operation: 'loadVersion', workspaceId: 'workspace-a' },
