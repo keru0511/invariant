@@ -101,6 +101,14 @@ describe('offline evaluation fixtures and scoring', () => {
     expect(invariantTrial.score).toMatchObject({ label: 'correct', passed: true });
   });
 
+  it('runs one recorded correct response through every case family', async () => {
+    const source = new RecordedResponseSource(correctResponses);
+    for (const fixture of OFFLINE_EVALUATION_FIXTURES) {
+      const trial = await llmOnlyAdapter.run(fixture, source);
+      expect(trial.score, fixture.id).toMatchObject({ label: 'correct', passed: true });
+    }
+  });
+
   it('records missing responses from the replay source instead of calling a live model', async () => {
     const trial = await llmOnlyAdapter.run(fixtureById('evaluation-v0.exception'), new RecordedResponseSource({}));
     expect(trial.episode).toMatchObject({ status: 'missing' });
