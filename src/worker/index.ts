@@ -1,16 +1,15 @@
 import { getDomainMetadata } from '../domain';
 import { handleMcpRequest } from './mcp';
+import type { Env } from './env';
 
-export interface Env {
-  // Cloudflare Workers のバインディング（KV, D1, 環境変数など）をここで定義
-}
+export type { Env } from './env';
 
 export const handler: ExportedHandler<Env> = {
-  async fetch(request: Request, _env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === '/mcp') {
-      return handleMcpRequest(request);
+      return handleMcpRequest(request, env);
     }
 
     if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
