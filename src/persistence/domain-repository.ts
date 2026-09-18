@@ -30,6 +30,12 @@ export interface LoadDomainVersionInput {
   readonly versionId: string;
 }
 
+export interface SearchDomainInput {
+  readonly workspaceId: string;
+  readonly query: string;
+  readonly limit: number;
+}
+
 export interface DomainVersionRecord {
   readonly workspaceId: string;
   readonly domainId: string;
@@ -38,10 +44,33 @@ export interface DomainVersionRecord {
   readonly publishedAt: string;
 }
 
+export interface DomainSearchCandidate {
+  readonly workspaceId: string;
+  readonly domainId: string;
+  readonly domainName: string;
+  readonly versionId: string;
+  readonly functionId: string;
+  readonly functionName: string;
+  readonly description: string;
+}
+
+export interface DomainSearchMatch {
+  readonly domainId: string;
+  readonly domainName: string;
+  readonly versionId: string;
+  readonly functionId: string;
+  readonly functionName: string;
+  readonly description: string;
+}
+
+export const DOMAIN_SEARCH_MAX_LIMIT = 100 as const;
+
 export class DomainRepositoryError extends Error {
   readonly name = 'DomainRepositoryError';
   readonly code:
     | 'INVALID_IDENTIFIER'
+    | 'INVALID_QUERY'
+    | 'INVALID_LIMIT'
     | 'INVALID_DOMAIN'
     | 'DUPLICATE_VERSION'
     | 'CORRUPT_VERSION'
@@ -71,6 +100,10 @@ interface StoredVersionRow {
   readonly published_at: string;
 }
 
+interface StoredSearchRow extends StoredVersionRow {
+  readonly domain_name: string;
+}
+
 const INSERT_WORKSPACE = `
   INSERT INTO workspaces (id, created_at)
   VALUES (?, ?)
@@ -87,6 +120,20 @@ const SELECT_VERSION = `
   SELECT workspace_id, domain_id, version_id, model_json, published_at
   FROM domain_versions
   WHERE workspace_id = ? AND domain_id = ? AND version_id = ?
+`;
+
+const SELECT_SEARCH_VERSIONS = `
+  SELECT
+    d.workspace_id,
+    d.id AS domain_id,
+    d.name AS domain_name,
+    v.version_id,
+    v.model_json,
+    v.published_at
+  FROM domains AS d
+  INNER JOIN domain_versions AS v
+    ON v.workspace_id = d.workspace_id AND v.domain_id = d.id
+  WHERE d.workspace_id = ?
 `;
 
 const INSERT_VERSION = `
@@ -132,6 +179,51 @@ function canonicalVersion(row: StoredVersionRow): DomainVersionRecord {
     model: parsed.value,
     publishedAt: row.published_at,
   });
+}
+
+function compareText(left: string, right: string): number {
+  const leftFolded = left.toLowerCase();
+  const rightFolded = right.toLowerCase();
+  if (leftFolded < rightFolded) return -1;
+  if (leftFolded > rightFolded) return 1;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function compareCandidates(left: DomainSearchCandidate, right: DomainSearchCandidate): number {
+  return compareText(left.domainName, right.domainName)
+    || compareText(left.domainId, right.domainId)
+    || compareText(left.functionName, right.functionName)
+    || compareText(left.functionId, right.functionId)
+    || compareText(left.versionId, right.versionId)
+    || compareText(left.description, right.description);
+}
+
+function searchQuery(value: string): string {
+  if (typeof value !== 'string') {
+    throw new DomainRepositoryError('INVALID_QUERY', 'query must be a string.');
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new DomainRepositoryError('INVALID_QUERY', 'query must be a non-empty trimmed string.');
+  }
+  return trimmed;
+}
+
+function searchLimit(value: number): number {
+  if (
+    typeof value !== 'number'
+    || !Number.isInteger(value)
+    || value < 1
+    || value > DOMAIN_SEARCH_MAX_LIMIT
+  ) {
+    throw new DomainRepositoryError(
+      'INVALID_LIMIT',
+      `limit must be an integer between 1 and ${DOMAIN_SEARCH_MAX_LIMIT}.`,
+    );
+  }
+  return value;
 }
 
 export class D1DomainRepository {
@@ -239,6 +331,43 @@ export class D1DomainRepository {
       versionId,
     ).first<StoredVersionRow>();
     return row === null ? null : canonicalVersion(row);
+  }
+
+  async search(input: SearchDomainInput): Promise<readonly DomainSearchCandidate[]> {
+    const workspaceId = identifier(input.workspaceId, 'workspaceId');
+    const query = searchQuery(input.query).toLowerCase();
+    const limit = searchLimit(input.limit);
+    const rows = await statement(this.db, SELECT_SEARCH_VERSIONS, workspaceId)
+      .all<StoredSearchRow>();
+    const candidates: DomainSearchCandidate[] = [];
+
+    for (const row of rows.results) {
+      // Keep the scope defensive even if a non-D1 test double returns rows it
+      // should not have returned for the bound workspace parameter.
+      if (row.workspace_id !== workspaceId) continue;
+      const version = canonicalVersion(row);
+      const domainMatches = row.domain_name.toLowerCase().includes(query);
+
+      for (const domainFunction of version.model.functions) {
+        if (!domainMatches
+          && !domainFunction.name.toLowerCase().includes(query)
+          && !domainFunction.description.toLowerCase().includes(query)) {
+          continue;
+        }
+        candidates.push(Object.freeze({
+          workspaceId: row.workspace_id,
+          domainId: row.domain_id,
+          domainName: row.domain_name,
+          versionId: row.version_id,
+          functionId: domainFunction.id,
+          functionName: domainFunction.name,
+          description: domainFunction.description,
+        }));
+      }
+    }
+
+    candidates.sort(compareCandidates);
+    return Object.freeze(candidates.slice(0, limit));
   }
 }
 

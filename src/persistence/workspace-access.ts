@@ -3,9 +3,12 @@ import type {
   CreateDomainInput,
   D1DatabaseLike,
   D1DomainRepository,
+  DomainSearchCandidate,
+  DomainSearchMatch,
   DomainVersionRecord,
   LoadDomainVersionInput,
   PublishDomainVersionInput,
+  SearchDomainInput,
 } from './domain-repository';
 
 const SELECT_MEMBERSHIP = `
@@ -91,9 +94,14 @@ export interface ScopedLoadDomainVersionInput {
   readonly versionId: string;
 }
 
+export interface ScopedSearchDomainInput {
+  readonly query: string;
+  readonly limit: number;
+}
+
 export type DomainRepositoryPort = Pick<
   D1DomainRepository,
-  'createDomain' | 'publishVersion' | 'loadVersion'
+  'createDomain' | 'publishVersion' | 'loadVersion' | 'search'
 >;
 
 /**
@@ -135,6 +143,17 @@ export class WorkspaceScopedDomainRepository {
       throw new WorkspaceAccessError();
     }
     return record;
+  }
+
+  async search(input: ScopedSearchDomainInput): Promise<readonly DomainSearchMatch[]> {
+    const request: SearchDomainInput = {
+      ...input,
+      workspaceId: this.scope.workspaceId,
+    };
+    const candidates = await this.repository.search(request);
+    return Object.freeze(candidates
+      .filter((candidate: DomainSearchCandidate) => candidate.workspaceId === this.scope.workspaceId)
+      .map(({ workspaceId: _workspaceId, ...match }) => match));
   }
 }
 

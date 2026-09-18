@@ -19,8 +19,11 @@ import {
   D1WorkspaceMembershipRepository,
   PUBLIC_RESOURCE_NOT_FOUND,
   WorkspaceAccessError,
+  DOMAIN_SEARCH_MAX_LIMIT,
+  type DomainSearchMatch,
   type DomainVersionRecord,
   type ScopedLoadDomainVersionInput,
+  type ScopedSearchDomainInput,
 } from '../persistence';
 import { createDomainRepository } from '../persistence/domain-repository';
 
@@ -39,6 +42,7 @@ export const VERIFIED_PRINCIPAL_AUTH_INFO_KEY = 'invariantAccessPrincipal';
 
 export interface McpWorkspaceDomainRepository {
   loadVersion(input: ScopedLoadDomainVersionInput): Promise<DomainVersionRecord>;
+  search(input: ScopedSearchDomainInput): Promise<readonly DomainSearchMatch[]>;
 }
 
 export interface McpWorkspaceRepository {
@@ -73,6 +77,14 @@ const domainEvaluateInputSchema = z.object({
 
 type DomainEvaluateInput = z.infer<typeof domainEvaluateInputSchema>;
 
+const domainSearchInputSchema = z.object({
+  workspace: z.string(),
+  query: z.string(),
+  limit: z.number(),
+}).strict();
+
+type DomainSearchInput = z.infer<typeof domainSearchInputSchema>;
+
 type DomainEvaluateStatus = 'resolved' | 'unresolved' | 'ambiguous' | 'conflict' | 'error';
 
 interface DomainEvaluateError {
@@ -96,6 +108,16 @@ export interface DomainEvaluateResult {
   readonly errors: readonly DomainEvaluateError[];
   readonly trace: readonly unknown[];
   readonly provenance: DomainProvenance;
+}
+
+export interface DomainSearchResult {
+  readonly status: 'ok' | 'error';
+  readonly ok: boolean;
+  readonly workspace: string;
+  readonly query: string;
+  readonly limit: number | null;
+  readonly results: readonly DomainSearchMatch[];
+  readonly errors: readonly DomainEvaluateError[];
 }
 
 function emptyProvenance(): DomainProvenance {
@@ -167,6 +189,79 @@ function evaluationResult(
     trace: result.trace,
     provenance: result.provenance,
   };
+}
+
+function searchError(
+  input: Partial<DomainSearchInput>,
+  code: string,
+  message: string,
+  path?: string,
+): DomainSearchResult {
+  return {
+    status: 'error',
+    ok: false,
+    workspace: input.workspace ?? '',
+    query: typeof input.query === 'string' ? input.query.trim() : '',
+    limit: typeof input.limit === 'number' ? input.limit : null,
+    results: [],
+    errors: [{ code, message, ...(path === undefined ? {} : { path }) }],
+  };
+}
+
+async function searchStoredDomain(
+  input: DomainSearchInput,
+  principal: AccessPrincipal,
+  env: Env,
+  dependencies: McpRequestDependencies,
+): Promise<DomainSearchResult> {
+  if (!isIdentifier(input.workspace)) {
+    return searchError(input, 'INVALID_ARGS', 'workspace must be a non-empty, trimmed string.', 'workspace');
+  }
+  if (typeof input.query !== 'string' || input.query.trim().length === 0) {
+    return searchError(input, 'INVALID_QUERY', 'query must be a non-empty trimmed string.', 'query');
+  }
+  if (
+    !Number.isInteger(input.limit)
+    || input.limit < 1
+    || input.limit > DOMAIN_SEARCH_MAX_LIMIT
+  ) {
+    return searchError(
+      input,
+      'INVALID_LIMIT',
+      `limit must be an integer between 1 and ${DOMAIN_SEARCH_MAX_LIMIT}.`,
+      'limit',
+    );
+  }
+
+  const query = input.query.trim();
+  try {
+    const repository = dependencies.workspaceRepository ?? productionWorkspaceRepository(env);
+    const workspace = await repository.forPrincipal(principal, input.workspace);
+    const results = await workspace.search({ query, limit: input.limit });
+    return {
+      status: 'ok',
+      ok: true,
+      workspace: input.workspace,
+      query,
+      limit: input.limit,
+      results,
+      errors: [],
+    };
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) {
+      return searchError(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
+    }
+    if (error instanceof DomainRepositoryError) {
+      if (error.code === 'INVALID_QUERY' || error.code === 'INVALID_LIMIT') {
+        return searchError(input, error.code, error.message, error.code === 'INVALID_QUERY' ? 'query' : 'limit');
+      }
+      if (error.code === 'CORRUPT_VERSION') {
+        return searchError(input, 'STORAGE_FAILURE', 'Stored domain version is invalid.');
+      }
+      return searchError(input, 'STORAGE_FAILURE', 'Stored domain search could not be completed.');
+    }
+    return searchError(input, 'STORAGE_FAILURE', 'Stored domain search could not be completed.');
+  }
 }
 
 function productionWorkspaceRepository(env: Env): McpWorkspaceRepository {
@@ -276,6 +371,26 @@ function createMcpServer(
     },
     async (input: DomainEvaluateInput) => {
       const result = await evaluateStoredDomain(input, principal, env, dependencies);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result),
+          },
+        ],
+        isError: result.status === 'error',
+      };
+    },
+  );
+
+  server.registerTool(
+    'domain.search',
+    {
+      description: 'Search authorized stored domain and function metadata.',
+      inputSchema: domainSearchInputSchema,
+    },
+    async (input: DomainSearchInput) => {
+      const result = await searchStoredDomain(input, principal, env, dependencies);
       return {
         content: [
           {
