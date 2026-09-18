@@ -2,3 +2,4 @@
 
 export * from './decision-context';
 export * from './decision-record';
+export * from './decision-comparison';
