@@ -6,6 +6,11 @@ import {
   CLIENT_INFO_META_KEY,
 } from '@modelcontextprotocol/server';
 
+const TEST_ENV = {
+  INVARIANT_ENVIRONMENT: 'test' as const,
+  MCP_AUTH_MODE: 'test-bypass' as const,
+};
+
 /**
  * 2026-07-28 Modern MCP リクエストを生成するテストヘルパー
  */
@@ -60,7 +65,7 @@ describe('MCP ハンドラー (/mcp)', () => {
       },
     });
 
-    const response = await handleMcpRequest(request);
+    const response = await handleMcpRequest(request, TEST_ENV);
     expect(response.status).toBe(204);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
       'http://localhost:5173'
@@ -78,7 +83,7 @@ describe('MCP ハンドラー (/mcp)', () => {
       origin: 'https://evil.com',
     });
 
-    const response = await handleMcpRequest(request);
+    const response = await handleMcpRequest(request, TEST_ENV);
     expect(response.status).toBe(403);
 
     const body = await response.json();
@@ -96,7 +101,7 @@ describe('MCP ハンドラー (/mcp)', () => {
       method: 'tools/list',
     });
 
-    const response = await handleMcpRequest(request);
+    const response = await handleMcpRequest(request, TEST_ENV);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain('application/json');
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
@@ -127,7 +132,7 @@ describe('MCP ハンドラー (/mcp)', () => {
       },
     });
 
-    const response = await handleMcpRequest(request);
+    const response = await handleMcpRequest(request, TEST_ENV);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain('application/json');
 
