@@ -16,6 +16,7 @@ import {
   findRunRecords,
   main,
   runActrunProcess,
+  runCommand,
   runGit,
   removeSnapshot,
   validateWorkflowDefinition,
@@ -236,6 +237,13 @@ describe('exact toolchain and entrypoint guards', () => {
       expectedActrunVersion: EXPECTED_ACTRUN_VERSION,
       npmVersionOverride: '11.9.0',
     }), 'missing-runner');
+  });
+
+  it('fails closed when a dependency command exits nonzero', async () => {
+    await expectAsyncGateError(
+      () => runCommand(execPath, ['-e', "process.stderr.write('dependency install failed'); process.exit(7)"], { cwd: repoRoot }),
+      'command-failed',
+    );
   });
 
   it('rejects runner arguments at the public entrypoint', async () => {
