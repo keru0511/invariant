@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - '**'
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - id: checkout
+        name: checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: setup-node
+        name: setup-node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - id: install
+        name: install
+        run: npm ci
+      - id: typecheck
+        name: typecheck
+        run: npm run typecheck
+      - id: tests
+        name: tests
+        run: npm test

@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Local CI gate artifacts
+.actrun-runs/
+_build/
+
 # Cloudflare Wrangler
 .wrangler/
 dist/

@@ -7,9 +7,12 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ci:local": "node scripts/ci-local.mjs",
+    "test:ci-gate": "node scripts/ci-gate-smoke.mjs"
   },
   "devDependencies": {
+    "@mizchi/actrun": "0.32.0",
     "@cloudflare/workers-types": "^4.20241205.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8",
