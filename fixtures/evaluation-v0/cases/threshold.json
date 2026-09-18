@@ -1,0 +1,13 @@
+{
+  "version": "evaluation-v0",
+  "id": "evaluation-v0.threshold",
+  "family": "threshold",
+  "prompt": "The risk score is exactly 50. Decide whether the account is allowed at the documented inclusive threshold.",
+  "knownFacts": ["risk.score", "risk.threshold", "threshold.is-inclusive"],
+  "knownConstraints": ["policy.high-risk-deny"],
+  "expected": {
+    "answer": "deny",
+    "requiredFacts": ["risk.score", "risk.threshold", "threshold.is-inclusive"],
+    "requiredConstraints": ["policy.high-risk-deny"]
+  }
+}

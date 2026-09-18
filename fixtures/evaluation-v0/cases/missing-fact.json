@@ -1,0 +1,13 @@
+{
+  "version": "evaluation-v0",
+  "id": "evaluation-v0.missing-fact",
+  "family": "missing-fact",
+  "prompt": "Decide whether this account may proceed. The account country is not available; do not infer it.",
+  "knownFacts": ["account.active", "account.country"],
+  "knownConstraints": ["policy.country-required"],
+  "expected": {
+    "answer": null,
+    "requiredFacts": ["account.active"],
+    "requiredConstraints": ["policy.country-required"]
+  }
+}

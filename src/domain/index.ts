@@ -32,3 +32,5 @@ export * from './contract';
 export * from './runtime';
 export * from './evaluator';
 export * from './test-runner';
+export * from './evaluation';
+export * from './evaluation-fixtures';
