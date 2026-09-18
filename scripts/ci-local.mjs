@@ -121,7 +121,10 @@ export function validateWorkflowDefinition(source) {
   }
 
   const triggerBlock = source.match(/^on:\s*\n([\s\S]*?)(?=^jobs:\s*$)/m)?.[1] ?? '';
-  const normalizedTrigger = triggerBlock.trim().replace(/\r\n/g, '\n');
+  const normalizedTrigger = triggerBlock
+    .trim()
+    .replace(/\r\n/g, '\n')
+    .replace(/^ {2}/gm, '');
   const expectedTrigger = [
     'workflow_dispatch:',
     'push:',
