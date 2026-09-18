@@ -7,7 +7,10 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:live": "vite-node --script scripts/live-evaluation.ts",
+    "eval:live:smoke": "vite-node --script scripts/live-evaluation.ts --trials 1",
+    "eval:live:large": "vite-node --script scripts/live-evaluation.ts --trials 10"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",

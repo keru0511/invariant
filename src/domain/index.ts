@@ -35,3 +35,4 @@ export * from './test-runner';
 export * from './evaluation';
 export * from './patch';
 export * from './conversation-patch';
+export * from './live-evaluation';

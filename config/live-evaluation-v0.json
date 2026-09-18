@@ -1,0 +1,9 @@
+{
+  "version": "live-evaluation-v0",
+  "fixtureVersion": "evaluation-v0",
+  "trialsPerCase": 1,
+  "outputDir": "artifacts/live-evaluation",
+  "model": "gpt-4o-mini",
+  "baseUrl": "https://api.openai.com/v1",
+  "timeoutMs": 30000
+}
