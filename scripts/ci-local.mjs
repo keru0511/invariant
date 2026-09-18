@@ -115,9 +115,13 @@ export async function assertCallerClean(repoRoot) {
   return status;
 }
 
+function workflowContractError(message) {
+  throw new GateError('workflow-contract', message);
+}
+
 export function validateWorkflowDefinition(source) {
   if (!/^name:\s*CI\s*$/m.test(source)) {
-    throw new GateError('workflow-contract', 'workflow name must be CI');
+    workflowContractError('workflow name must be CI');
   }
 
   const triggerBlock = source.match(/^on:\s*\n([\s\S]*?)(?=^jobs:\s*$)/m)?.[1] ?? '';
@@ -132,34 +136,109 @@ export function validateWorkflowDefinition(source) {
     "    - '**'",
   ].join('\n');
   if (normalizedTrigger !== expectedTrigger) {
-    throw new GateError(
-      'workflow-contract',
-      "workflow triggers must be workflow_dispatch plus push with branches-ignore ['**']",
+    workflowContractError("workflow triggers must be workflow_dispatch plus push with branches-ignore ['**']");
+  }
+
+  const workflowLines = source.replace(/\r\n/g, '\n').split('\n');
+  const jobsIndex = workflowLines.findIndex((line) => line === 'jobs:');
+  if (jobsIndex === -1) {
+    workflowContractError('workflow must define jobs');
+  }
+
+  const jobHeaders = workflowLines
+    .map((line, index) => ({ match: line.match(/^  ([A-Za-z0-9_-]+):\s*$/), index }))
+    .filter(({ match, index }) => match && index > jobsIndex)
+    .map(({ match, index }) => ({ id: match[1], index }));
+  if (jobHeaders.length !== 1 || jobHeaders[0].id !== JOB_ID) {
+    workflowContractError(`workflow must define exactly one approved job: ${JOB_ID}`);
+  }
+
+  const qualityJob = jobHeaders[0];
+  const qualityJobEnd = jobHeaders[1]?.index ?? workflowLines.length;
+  const qualityJobLines = workflowLines.slice(qualityJob.index, qualityJobEnd);
+  if (!qualityJobLines.includes('    name: quality')) {
+    workflowContractError('workflow job quality must have name quality');
+  }
+  if (qualityJobLines.filter((line) => line === '    steps:').length !== 1) {
+    workflowContractError('workflow job quality must define exactly one steps block');
+  }
+
+  const stepStarts = workflowLines
+    .map((line, index) => ({ match: line.match(/^      - id: ([A-Za-z0-9_-]+)\s*$/), index }))
+    .filter(({ index, match }) => match && index > qualityJob.index && index < qualityJobEnd)
+    .map(({ match, index }) => ({ id: match[1], index }));
+  const topLevelStepItems = qualityJobLines.filter((line) => /^      - /.test(line));
+  const expectedStepIds = ['checkout', 'setup-node', ...MANDATORY_STEP_IDS];
+  if (
+    topLevelStepItems.length !== expectedStepIds.length
+    || stepStarts.length !== expectedStepIds.length
+    || stepStarts.map(({ id }) => id).join(',') !== expectedStepIds.join(',')
+  ) {
+    workflowContractError(
+      `workflow job quality must contain exactly these ordered steps: ${expectedStepIds.join(', ')}`,
     );
   }
 
-  if (!/^  quality:\s*$/m.test(source) || !/^    name:\s*quality\s*$/m.test(source)) {
-    throw new GateError('workflow-contract', 'workflow must define job quality with name quality');
-  }
+  const actionEntries = [];
+  for (const [stepIndex, step] of stepStarts.entries()) {
+    const end = stepStarts[stepIndex + 1]?.index ?? qualityJobEnd;
+    const stepLines = workflowLines.slice(step.index, end);
+    const usesLines = stepLines.filter((line) => /^\s*uses\s*:/.test(line));
+    const runLines = stepLines.filter((line) => /^\s*run\s*:/.test(line));
+    const expectedAction = step.id === 'checkout'
+      ? 'actions/checkout'
+      : step.id === 'setup-node'
+        ? 'actions/setup-node'
+        : null;
 
-  for (const stepId of MANDATORY_STEP_IDS) {
-    if (!new RegExp(`^\\s{6}- id: ${stepId}\\s*$`, 'm').test(source)) {
-      throw new GateError('workflow-contract', `mandatory step ${stepId} is missing`);
+    if (expectedAction) {
+      if (usesLines.length !== 1) {
+        workflowContractError(`${step.id} must contain exactly one uses entry`);
+      }
+      if (runLines.length > 0) {
+        workflowContractError(`${step.id} may not contain a run entry`);
+      }
+    } else {
+      if (usesLines.length > 0) {
+        workflowContractError(`unapproved uses entry in step ${step.id}`);
+      }
+      const requiredCommand = {
+        install: 'npm ci',
+        typecheck: 'npm run typecheck',
+        tests: 'npm test',
+      }[step.id];
+      if (runLines.length !== 1 || runLines[0] !== `        run: ${requiredCommand}`) {
+        workflowContractError(`step ${step.id} must run ${requiredCommand}`);
+      }
+    }
+
+    for (const usesLine of usesLines) {
+      const value = usesLine.match(/^\s*uses\s*:\s*(\S+)\s*$/)?.[1];
+      if (!value) {
+        workflowContractError(`uses entry in step ${step.id} is malformed`);
+      }
+      const separator = value.lastIndexOf('@');
+      const action = separator > 0 ? value.slice(0, separator) : value;
+      const revision = separator > 0 ? value.slice(separator + 1) : '';
+      if (!Object.hasOwn(ACTION_REVISIONS, action)) {
+        workflowContractError(`uses entry ${value} is not approved`);
+      }
+      if (!/^[0-9a-f]{40}$/.test(revision) || revision !== ACTION_REVISIONS[action]) {
+        workflowContractError(
+          `${action} must use exact approved revision ${ACTION_REVISIONS[action]}`,
+        );
+      }
+      if (action !== expectedAction) {
+        workflowContractError(`${step.id} must use ${expectedAction}`);
+      }
+      actionEntries.push(action);
     }
   }
 
-  const requiredCommands = [
-    ['install', 'npm ci'],
-    ['typecheck', 'npm run typecheck'],
-    ['tests', 'npm test'],
-  ];
-  const workflowLines = source.split('\n');
-  for (const [stepId, command] of requiredCommands) {
-    const start = workflowLines.findIndex((line) => new RegExp(`^ {6}- id: ${stepId}\\s*$`).test(line));
-    const end = workflowLines.findIndex((line, index) => index > start && /^ {6}- id: /.test(line));
-    const stepLines = workflowLines.slice(start, end === -1 ? workflowLines.length : end);
-    if (!stepLines.some((line) => line === `        run: ${command}`)) {
-      throw new GateError('workflow-contract', `step ${stepId} must run ${command}`);
+  for (const action of Object.keys(ACTION_REVISIONS)) {
+    const count = actionEntries.filter((entry) => entry === action).length;
+    if (count !== 1) {
+      workflowContractError(`${action} must appear exactly once with its approved revision`);
     }
   }
 

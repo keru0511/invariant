@@ -15,6 +15,8 @@
 
 The workflow retains `workflow_dispatch` for manual GitHub runs and adds `push` with `branches-ignore: ['**']`. GitHub therefore does not run the workflow for ordinary branch pushes, while the local gate explicitly invokes actrun with `--trigger push`. actrun 0.32.0 reports that it skips trigger matching for this explicit local event. The local `actrun.toml` skips the two setup actions because the gate has already created a detached snapshot and has checked the exact Node/npm prerequisite before starting the runner. Hosted GitHub Actions still sees the pinned setup actions.
 
+The wrapper validates this workflow shape before creating a snapshot. `ACTION_REVISIONS` is an allowlist, not documentation only: `actions/checkout` and `actions/setup-node` must each occur exactly once and must use the exact full SHAs above. Tag or branch refs, another SHA, a missing or duplicate action step, any other `uses` entry, and any extra job or step fail closed with `workflow-contract`. The approved workflow has exactly one `quality` job and the ordered steps `checkout`, `setup-node`, `install`, `typecheck`, and `tests`; no other action is accepted.
+
 ## Gate invariants
 
 Before the runner starts, the wrapper:

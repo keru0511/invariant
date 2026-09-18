@@ -1,11 +1,13 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn as spawnProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execPath } from 'node:process';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   ALLOWED_IGNORED_PREFIXES,
+  ACTION_REVISIONS,
   EXPECTED_ACTRUN_VERSION,
   GateError,
   assertCleanStatus,
@@ -18,6 +20,7 @@ import {
   runActrunProcess,
   runCommand,
   runGit,
+  runGate,
   removeSnapshot,
   validateWorkflowDefinition,
   verifyRunRecord,
@@ -26,6 +29,7 @@ import {
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const temporaryDirectories = [];
+const itOnExactNode = process.versions.node === '22.19.0' ? it : it.skip;
 
 afterAll(async () => {
   await Promise.all(temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })));
@@ -50,6 +54,62 @@ function expectGateError(callback, code) {
 
 function expectAsyncGateError(callback, code) {
   return expect(callback()).rejects.toMatchObject({ code });
+}
+
+async function createGateFixture(prefix, runnerSource) {
+  const root = await temporaryDirectory(prefix);
+  await mkdir(join(root, '.github/workflows'), { recursive: true });
+  await mkdir(join(root, 'node_modules/@mizchi/actrun'), { recursive: true });
+  await mkdir(join(root, 'node_modules/.bin'), { recursive: true });
+  await writeFile(join(root, '.gitignore'), 'node_modules/\n.actrun-runs/\n_build/\n');
+  await writeFile(join(root, '.node-version'), `${process.versions.node}\n`);
+  await writeFile(join(root, 'caller.txt'), 'original\n');
+  await writeFile(join(root, '.github/workflows/ci.yml'), await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8'));
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'ci-local-fixture',
+    version: '1.0.0',
+    devDependencies: { '@mizchi/actrun': EXPECTED_ACTRUN_VERSION },
+  }));
+  await writeFile(join(root, 'package-lock.json'), JSON.stringify({
+    name: 'ci-local-fixture',
+    version: '1.0.0',
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': { devDependencies: { '@mizchi/actrun': EXPECTED_ACTRUN_VERSION } },
+      'node_modules/@mizchi/actrun': {
+        version: EXPECTED_ACTRUN_VERSION,
+        resolved: 'https://registry.npmjs.org/@mizchi/actrun/-/actrun-0.32.0.tgz',
+        integrity: 'sha512-fixture',
+      },
+    },
+  }));
+  await writeFile(join(root, 'node_modules/@mizchi/actrun/package.json'), JSON.stringify({
+    name: '@mizchi/actrun',
+    version: EXPECTED_ACTRUN_VERSION,
+  }));
+  const runnerPath = join(root, 'node_modules/.bin/actrun');
+  await writeFile(runnerPath, runnerSource);
+  await chmod(runnerPath, 0o755);
+  await runGit(['init', '-q'], root);
+  await runGit(['config', 'user.email', 'ci-test@example.invalid'], root);
+  await runGit(['config', 'user.name', 'ci-test'], root);
+  await runGit(['add', '.'], root);
+  await runGit(['commit', '-m', 'fixture'], root);
+  return root;
+}
+
+async function waitForFile(path, timeoutMs = 5_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 function validRunRecord() {
@@ -78,8 +138,11 @@ function validRunRecord() {
 }
 
 describe('workflow contract', () => {
-  it('accepts the committed dual-trigger workflow', async () => {
+  it('accepts exactly one checkout and setup-node at the approved full SHAs', async () => {
     const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    for (const [action, revision] of Object.entries(ACTION_REVISIONS)) {
+      expect(source.match(new RegExp(`${action}@${revision}`, 'g'))).toHaveLength(1);
+    }
     expect(validateWorkflowDefinition(source)).toBe(true);
   });
 
@@ -90,6 +153,62 @@ describe('workflow contract', () => {
       () => validateWorkflowDefinition(source.replace("      - '**'", "      - main")),
       'workflow-contract',
     );
+  });
+
+  it.each([
+    ['checkout tag', 'actions/checkout', 'v4'],
+    ['setup-node branch', 'actions/setup-node', 'main'],
+    ['checkout wrong SHA', 'actions/checkout', '0'.repeat(40)],
+    ['setup-node wrong SHA', 'actions/setup-node', 'f'.repeat(40)],
+  ])('rejects an unapproved action revision: %s', async (_name, action, revision) => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const approvedRevision = ACTION_REVISIONS[action];
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace(`${action}@${approvedRevision}`, `${action}@${revision}`)),
+      'workflow-contract',
+    );
+  });
+
+  it.each([
+    ['missing checkout', /      - id: checkout\n[\s\S]*?(?=      - id: setup-node)/],
+    ['missing setup-node', /      - id: setup-node\n[\s\S]*?(?=      - id: install)/],
+  ])('rejects a missing approved action step: %s', async (_name, stepPattern) => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    expectGateError(() => validateWorkflowDefinition(source.replace(stepPattern, '')), 'workflow-contract');
+  });
+
+  it('rejects a duplicate approved action step', async () => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const checkout = source.match(/      - id: checkout\n[\s\S]*?(?=      - id: setup-node)/)?.[0];
+    expect(checkout).toBeTruthy();
+    expectGateError(
+      () => validateWorkflowDefinition(source.replace('      - id: setup-node', `${checkout}      - id: setup-node`)),
+      'workflow-contract',
+    );
+  });
+
+  it('rejects an extra or unapproved uses entry', async () => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const withExtraUses = source.replace(
+      '        run: npm ci',
+      '        uses: actions/unapproved@0000000000000000000000000000000000000000\n        run: npm ci',
+    );
+    expectGateError(() => validateWorkflowDefinition(withExtraUses), 'workflow-contract');
+  });
+
+  it('rejects an unapproved extra step', async () => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const withExtraStep = source.replace(
+      '      - id: tests',
+      '      - id: extra\n        run: echo extra\n      - id: tests',
+    );
+    expectGateError(() => validateWorkflowDefinition(withExtraStep), 'workflow-contract');
+  });
+
+  it('rejects an unapproved extra job', async () => {
+    const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const withExtraJob = `${source}\n  extra:\n    name: extra\n    steps:\n      - id: extra\n        run: echo extra\n`;
+    expectGateError(() => validateWorkflowDefinition(withExtraJob), 'workflow-contract');
   });
 });
 
@@ -134,6 +253,85 @@ describe('caller cleanliness and immutable snapshot guards', () => {
     }
     const after = await runGit(['worktree', 'list', '--porcelain'], root);
     expect(after).not.toContain('invariant-ci-local-');
+  });
+});
+
+describe('active-run caller preservation and interruption', () => {
+  itOnExactNode('detects a caller HEAD and tracked-file mutation during an active run', async () => {
+    const root = await createGateFixture(
+      'invariant-active-run-mutation-',
+      `#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const caller = ${JSON.stringify('PLACEHOLDER')};
+writeFileSync(${JSON.stringify('PLACEHOLDER_FILE')}, 'mutated\\n');
+execFileSync('git', ['-C', caller, 'add', 'caller.txt']);
+execFileSync('git', ['-C', caller, 'commit', '-m', 'unexpected caller mutation']);
+`,
+    );
+    const runnerPath = join(root, 'node_modules/.bin/actrun');
+    const runnerSource = await readFile(runnerPath, 'utf8');
+    await writeFile(runnerPath, runnerSource
+      .replace(JSON.stringify('PLACEHOLDER'), JSON.stringify(root))
+      .replace(JSON.stringify('PLACEHOLDER_FILE'), JSON.stringify(join(root, 'caller.txt'))));
+
+    const initialHead = await runGit(['rev-parse', 'HEAD'], root);
+    await expectAsyncGateError(() => runGate({ cwd: root, timeoutMs: 5_000 }), 'caller-changed');
+    const finalHead = await runGit(['rev-parse', 'HEAD'], root);
+    expect(finalHead).not.toBe(initialHead);
+    expect(await readFile(join(root, 'caller.txt'), 'utf8')).toBe('mutated\n');
+    expect(await runGit(['status', '--porcelain'], root)).toBe('');
+    expect((await runGit(['worktree', 'list', '--porcelain'], root)).split('\n\n')).toHaveLength(1);
+  });
+
+  itOnExactNode('preserves a clean caller and removes the snapshot after SIGINT', async () => {
+    const root = await createGateFixture(
+      'invariant-sigint-run-',
+      `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from 'node:fs';
+const marker = ${JSON.stringify('PLACEHOLDER_MARKER')};
+mkdirSync(${JSON.stringify('PLACEHOLDER_BUILD')}, { recursive: true });
+writeFileSync(marker, 'started\\n');
+setInterval(() => {}, 1_000);
+`,
+    );
+    const runnerPath = join(root, 'node_modules/.bin/actrun');
+    const runnerSource = await readFile(runnerPath, 'utf8');
+    const marker = join(root, '_build/runner-started');
+    const harnessDirectory = await temporaryDirectory('invariant-sigint-harness-');
+    const harness = join(harnessDirectory, 'run-gate.mjs');
+    const gateModule = pathToFileURL(join(repoRoot, 'scripts/ci-local.mjs')).href;
+    await writeFile(runnerPath, runnerSource
+      .replace(JSON.stringify('PLACEHOLDER_MARKER'), JSON.stringify(marker))
+      .replace(JSON.stringify('PLACEHOLDER_BUILD'), JSON.stringify(join(root, '_build'))));
+    await writeFile(harness, `import { formatFailure, runGate } from ${JSON.stringify(gateModule)};\ntry {\n  await runGate({ timeoutMs: 10_000 });\n  process.exitCode = 0;\n} catch (error) {\n  process.stderr.write(formatFailure(error));\n  process.exitCode = 1;\n}\n`);
+
+    const initialHead = await runGit(['rev-parse', 'HEAD'], root);
+    const child = spawnProcess(execPath, [harness], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk) => { stdout += chunk; });
+    child.stderr?.on('data', (chunk) => { stderr += chunk; });
+    const exitPromise = new Promise((resolve) => {
+      child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
+    });
+    try {
+      await waitForFile(marker);
+      expect(child.kill('SIGINT')).toBe(true);
+    } catch (error) {
+      child.kill('SIGKILL');
+      await exitPromise;
+      throw error;
+    }
+    const result = await exitPromise;
+    expect(result.exitCode).not.toBe(0);
+    expect(`${stdout}${stderr}`).toContain('interrupted');
+    expect(await runGit(['status', '--porcelain'], root)).toBe('');
+    expect(await runGit(['rev-parse', 'HEAD'], root)).toBe(initialHead);
+    expect((await runGit(['worktree', 'list', '--porcelain'], root)).split('\n\n')).toHaveLength(1);
   });
 });
 
