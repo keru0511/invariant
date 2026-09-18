@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export const EXPECTED_NODE_VERSION = '22.19.0';
+export const EXPECTED_NODE_VERSION = '24.19.0';
 export const EXPECTED_NPM_VERSION = '11.9.0';
 export const EXPECTED_ACTRUN_VERSION = '0.32.0';
 export const WORKFLOW_PATH = '.github/workflows/ci.yml';

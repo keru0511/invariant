@@ -9,6 +9,7 @@ import {
   ALLOWED_IGNORED_PREFIXES,
   ACTION_REVISIONS,
   EXPECTED_ACTRUN_VERSION,
+  EXPECTED_NODE_VERSION,
   GateError,
   assertCleanStatus,
   assertCallerHeadUnchanged,
@@ -29,7 +30,7 @@ import {
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const temporaryDirectories = [];
-const itOnExactNode = process.versions.node === '22.19.0' ? it : it.skip;
+const itOnExactNode = process.versions.node === EXPECTED_NODE_VERSION ? it : it.skip;
 
 afterAll(async () => {
   await Promise.all(temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })));
@@ -405,7 +406,7 @@ describe('fail-closed run-record validation', () => {
 describe('exact toolchain and entrypoint guards', () => {
   it('fails when the running Node version is not the exact pinned version', async () => {
     const root = await temporaryDirectory('invariant-toolchain-node-');
-    const wrongVersion = process.versions.node === '22.19.0' ? '24.19.0' : '22.19.0';
+    const wrongVersion = process.versions.node === EXPECTED_NODE_VERSION ? '23.0.0' : EXPECTED_NODE_VERSION;
     await writeFile(join(root, '.node-version'), `${wrongVersion}\n`);
     await expectAsyncGateError(() => assertExactToolchain(root, {
       expectedNodeVersion: wrongVersion,

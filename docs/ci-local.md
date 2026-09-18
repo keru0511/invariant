@@ -7,9 +7,9 @@
 | Item | Pin or revision |
 | --- | --- |
 | OS target | Linux/macOS developer environments; smoke evidence in this PR is Linux x86_64 only |
-| Node | `22.19.0` in `.node-version` |
+| Node | `24.19.0` in `.node-version` |
 | npm | `11.9.0` |
-| `@mizchi/actrun` | exact `0.32.0` in `package.json` and `package-lock.json` |
+| `@mizchi/actrun` | exact `0.32.0` in `package.json` and `package-lock.json` (Node `>=18`) |
 | `actions/checkout` | `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`) |
 | `actions/setup-node` | `49933ea5288caeca8642d1e84afbd3f7d6820020` (`v4.4.0`) |
 
@@ -34,7 +34,7 @@ The only ignored paths declared for the gate are `node_modules/`, `.actrun-runs/
 
 ## Tests
 
-`npm test` runs the wrapper/unit and fixture-contract tests. `npm run test:ci-gate` is separate and invokes the real pinned actrun in disposable fixture repositories. Fixtures do not contain the gate integration harness, so there is no `npm test -> ci:local -> npm test` recursion.
+`npm test` runs the wrapper/unit and fixture-contract tests. The active-run mutation and SIGINT-preservation fixtures run when the exact supported local Node `24.19.0` is active; they are skipped on other Node versions and are never reported as PASS from a skipped run. `npm run test:ci-gate` is separate and invokes the real pinned actrun in disposable fixture repositories. Fixtures do not contain the gate integration harness, so there is no `npm test -> ci:local -> npm test` recursion.
 
 The fixture smoke uses the committed dual-trigger shape and explicitly passes `--trigger push`. It checks the positive run record and two intentional failures; it does not treat a log substring as success.
 
