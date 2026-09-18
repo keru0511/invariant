@@ -102,6 +102,15 @@ function createModernRequest(options: {
   });
 }
 
+async function readToolResult(response: Response): Promise<Record<string, unknown>> {
+  const body = await response.json() as {
+    readonly result: {
+      readonly content: readonly [{ readonly text: string }];
+    };
+  };
+  return JSON.parse(body.result.content[0].text) as Record<string, unknown>;
+}
+
 describe('MCP ハンドラー (/mcp)', () => {
   it('CORS OPTIONS プリフライトに対して 204 と Mcp-Method/Mcp-Name を含む許可ヘッダーを返却する', async () => {
     const request = new Request('http://localhost/mcp', {
@@ -197,6 +206,327 @@ describe('MCP ハンドラー (/mcp)', () => {
         ],
       },
     });
+  });
+
+  it('AC: domain.describe and domain.validate are registered with explicit resource schemas', async () => {
+    const response = await handleMcpRequest(createModernRequest({ method: 'tools/list' }), TEST_ENV);
+    const body = await response.json() as {
+      readonly result: {
+        readonly tools: ReadonlyArray<{
+          readonly name: string;
+          readonly inputSchema?: Record<string, unknown>;
+        }>;
+      };
+    };
+    const describe = body.result.tools.find((tool) => tool.name === 'domain.describe');
+    const validate = body.result.tools.find((tool) => tool.name === 'domain.validate');
+
+    expect(describe).toBeDefined();
+    expect(validate).toBeDefined();
+    expect(describe?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        workspace: { type: 'string' },
+        domain: { type: 'string' },
+        version: { type: 'string' },
+        function: { type: 'string' },
+      },
+      required: ['workspace', 'domain', 'version'],
+    });
+    expect(validate?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        workspace: { type: 'string' },
+        domain: { type: 'string' },
+        version: { type: 'string' },
+      },
+      required: ['workspace', 'domain', 'version'],
+    });
+  });
+
+  it('AC: domain.describe authorizes, loads the exact version, and returns stored input type schemas', async () => {
+    const repository = createFakeWorkspaceRepository();
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.describe',
+      params: {
+        name: 'domain.describe',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({
+      status: 'ok',
+      ok: true,
+      workspace: 'workspace-a',
+      domain: 'orders',
+      version: 'v1',
+      contractVersion: 'domain-v0',
+      kind: 'function-catalog',
+    });
+    expect(result.functions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'function.domain-v0.member-age',
+        name: 'member-age',
+        inputs: [{ path: 'user.age', type: 'number', required: true }],
+      }),
+      expect.objectContaining({
+        id: 'function.domain-v0.refund',
+        inputs: [
+          { path: 'order.status', type: 'string', required: true },
+          { path: 'order.total', type: 'number', required: true },
+        ],
+      }),
+    ]));
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+    ]);
+  });
+
+  it('AC: domain.describe selects one stored function and reports unknown functions explicitly', async () => {
+    const repository = createFakeWorkspaceRepository();
+    const selectedResponse = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.describe',
+      params: {
+        name: 'domain.describe',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+          function: 'refund',
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const selected = await readToolResult(selectedResponse);
+    expect(selected).toMatchObject({
+      status: 'ok',
+      function: {
+        id: 'function.domain-v0.refund',
+        name: 'refund',
+        inputs: [
+          { path: 'order.status', type: 'string', required: true },
+          { path: 'order.total', type: 'number', required: true },
+        ],
+      },
+    });
+
+    const unknownResponse = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.describe',
+      params: {
+        name: 'domain.describe',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+          function: 'missing-function',
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const unknown = await readToolResult(unknownResponse);
+    expect(unknown).toMatchObject({
+      status: 'error',
+      ok: false,
+      errors: [{ code: 'INVALID_FUNCTION', path: 'function' }],
+    });
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+    ]);
+  });
+
+  it('AC: domain.validate returns a successful deterministic validation report for the exact stored version', async () => {
+    const repository = createFakeWorkspaceRepository();
+    const request = () => createModernRequest({
+      method: 'tools/call',
+      name: 'domain.validate',
+      params: {
+        name: 'domain.validate',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+        },
+      },
+    });
+    const first = await readToolResult(await handleMcpRequest(request(), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    }));
+    const second = await readToolResult(await handleMcpRequest(request(), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    }));
+
+    expect(first).toMatchObject({
+      status: 'valid',
+      ok: true,
+      valid: true,
+      workspace: 'workspace-a',
+      domain: 'orders',
+      version: 'v1',
+      contractVersion: 'domain-v0',
+      errors: [],
+    });
+    expect(second).toEqual(first);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+    ]);
+  });
+
+  it('AC: domain.validate returns the same deterministic errors as direct #24 validation', async () => {
+    const invalidModel = JSON.parse(JSON.stringify(functionCatalog)) as {
+      functions: Array<{ policy: { rules: Array<{ when: { left: { path: string } } }> } }>;
+    };
+    invalidModel.functions[0].policy.rules[0].when.left.path = 'user.missing';
+    const direct = parseDomain(invalidModel);
+    expect(direct.ok).toBe(false);
+    if (direct.ok) return;
+
+    const repository = createFakeWorkspaceRepository({
+      model: invalidModel as unknown as DomainVersionRecord['model'],
+    });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.validate',
+      params: {
+        name: 'domain.validate',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({ status: 'invalid', ok: false, valid: false });
+    expect(result.errors).toEqual(direct.errors);
+    expect(result.error).toEqual(direct.error);
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+    ]);
+  });
+
+  it.each(['domain.describe', 'domain.validate'] as const)('AC: %s reports an unknown version without exposing metadata', async (toolName) => {
+    const repository = createFakeWorkspaceRepository({
+      load: async () => { throw new WorkspaceAccessError(); },
+    });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: toolName,
+      params: {
+        name: toolName,
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'missing-version',
+          ...(toolName === 'domain.describe' ? { function: 'member-age' } : {}),
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({
+      status: 'error',
+      ok: false,
+      errors: [{ code: 'RESOURCE_NOT_FOUND', message: 'Resource not found.' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('member-age');
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'loadVersion', workspaceId: 'workspace-a' },
+    ]);
+  });
+
+  it.each(['domain.describe', 'domain.validate'] as const)('AC: %s does not leak cross-workspace metadata or call storage', async (toolName) => {
+    const repository = createFakeWorkspaceRepository({ authorizedWorkspace: 'workspace-a' });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: toolName,
+      params: {
+        name: toolName,
+        arguments: {
+          workspace: 'workspace-b',
+          domain: 'orders',
+          version: 'v1',
+          ...(toolName === 'domain.describe' ? { function: 'member-age' } : {}),
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({
+      status: 'error',
+      ok: false,
+      errors: [{ code: 'RESOURCE_NOT_FOUND', message: 'Resource not found.' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('workspace-a');
+    expect(JSON.stringify(result)).not.toContain('function.domain-v0');
+    expect(repository.calls).toEqual([{ operation: 'authorize', workspaceId: 'workspace-b' }]);
+  });
+
+  it.each(['domain.describe', 'domain.validate'] as const)('AC: %s maps storage failures to fixed public errors', async (toolName) => {
+    const repository = createFakeWorkspaceRepository({
+      load: async () => { throw new Error('secret SQL details'); },
+    });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: toolName,
+      params: {
+        name: toolName,
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+          ...(toolName === 'domain.describe' ? { function: 'member-age' } : {}),
+        },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({
+      status: 'error',
+      ok: false,
+      errors: [{ code: 'STORAGE_FAILURE', message: 'Stored domain version could not be loaded.' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('secret SQL details');
   });
 
   it('AC: domain.evaluate authorizes, loads the explicit version, and returns trace/provenance', async () => {
