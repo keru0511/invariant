@@ -1,0 +1,48 @@
+{
+  "id": "fixture.domain-v0.member-age-boundary",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "boundary",
+  "functionId": "function.domain-v0.member-age",
+  "description": "Age 18 is included by the gte adult rule.",
+  "input": {
+    "user": {"age": 18}
+  },
+  "expected": {
+    "status": "allow",
+    "value": true,
+    "matchedRuleIds": ["rule.domain-v0.member-age.allow-adult"],
+    "unresolvedPaths": [],
+    "errors": [],
+    "trace": [
+      {
+        "id": "trace.domain-v0.member-age-boundary.input-age",
+        "stage": "input",
+        "nodeId": "node.domain-v0.member-age.allow-adult.input-age",
+        "outcome": true,
+        "observed": 18
+      },
+      {
+        "id": "trace.domain-v0.member-age-boundary.compare",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.member-age.allow-adult.compare",
+        "operator": "gte",
+        "outcome": true,
+        "observed": true
+      },
+      {
+        "id": "trace.domain-v0.member-age-boundary.rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.member-age.allow-adult",
+        "outcome": "allow"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.member-age-boundary",
+      "functionId": "function.domain-v0.member-age",
+      "policyId": "policy.domain-v0.member-age",
+      "inputPaths": ["user.age"],
+      "ruleIds": ["rule.domain-v0.member-age.allow-adult"]
+    }
+  }
+}

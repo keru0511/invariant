@@ -1,0 +1,48 @@
+{
+  "id": "fixture.domain-v0.member-age-underage",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "valid",
+  "functionId": "function.domain-v0.member-age",
+  "description": "Age 17 matches the lt minor rule and is denied.",
+  "input": {
+    "user": {"age": 17}
+  },
+  "expected": {
+    "status": "deny",
+    "value": false,
+    "matchedRuleIds": ["rule.domain-v0.member-age.deny-minor"],
+    "unresolvedPaths": [],
+    "errors": [],
+    "trace": [
+      {
+        "id": "trace.domain-v0.member-age-underage.input-age",
+        "stage": "input",
+        "nodeId": "node.domain-v0.member-age.deny-minor.input-age",
+        "outcome": true,
+        "observed": 17
+      },
+      {
+        "id": "trace.domain-v0.member-age-underage.compare",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.member-age.deny-minor.compare",
+        "operator": "lt",
+        "outcome": true,
+        "observed": true
+      },
+      {
+        "id": "trace.domain-v0.member-age-underage.rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.member-age.deny-minor",
+        "outcome": "deny"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.member-age-underage",
+      "functionId": "function.domain-v0.member-age",
+      "policyId": "policy.domain-v0.member-age",
+      "inputPaths": ["user.age"],
+      "ruleIds": ["rule.domain-v0.member-age.deny-minor"]
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "fixture.domain-v0.account-allow-active",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "valid",
+  "functionId": "function.domain-v0.account-review",
+  "description": "An active, low-risk account outside JP matches the lower-priority allow rule.",
+  "input": {
+    "account": {"state": "active", "riskScore": 10, "country": "US"}
+  },
+  "expected": {
+    "status": "allow",
+    "value": true,
+    "matchedRuleIds": ["rule.domain-v0.account-review.allow-not-suspended"],
+    "unresolvedPaths": [],
+    "errors": [],
+    "trace": [
+      {
+        "id": "trace.domain-v0.account-allow-active.state-not",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.account-review.allow-not-suspended.not",
+        "operator": "not",
+        "outcome": true,
+        "observed": true
+      },
+      {
+        "id": "trace.domain-v0.account-allow-active.rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.allow-not-suspended",
+        "outcome": "allow"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.account-allow-active",
+      "functionId": "function.domain-v0.account-review",
+      "policyId": "policy.domain-v0.account-review",
+      "inputPaths": ["account.state", "account.riskScore", "account.country"],
+      "ruleIds": [
+        "rule.domain-v0.account-review.allow-not-suspended",
+        "rule.domain-v0.account-review.deny-high-risk",
+        "rule.domain-v0.account-review.allow-trusted-country"
+      ]
+    }
+  }
+}

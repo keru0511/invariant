@@ -1,0 +1,53 @@
+{
+  "id": "fixture.domain-v0.refund-invalid-type",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "invalid",
+  "functionId": "function.domain-v0.refund",
+  "description": "A string total cannot be compared with the numeric refund limit.",
+  "input": {
+    "order": {"status": "paid", "total": "100"}
+  },
+  "expected": {
+    "status": "error",
+    "value": null,
+    "matchedRuleIds": [],
+    "unresolvedPaths": [],
+    "errors": [
+      {
+        "code": "TYPE_MISMATCH",
+        "message": "Expected number at 'order.total', got string.",
+        "path": "order.total",
+        "nodeId": "node.domain-v0.refund.allow-paid-under-limit.input-total"
+      }
+    ],
+    "trace": [
+      {
+        "id": "trace.domain-v0.refund-invalid-type.input-total",
+        "stage": "input",
+        "nodeId": "node.domain-v0.refund.allow-paid-under-limit.input-total",
+        "outcome": "error",
+        "observed": "100"
+      },
+      {
+        "id": "trace.domain-v0.refund-invalid-type.operator",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.refund.allow-paid-under-limit.total-lte",
+        "operator": "lte",
+        "outcome": "error"
+      },
+      {
+        "id": "trace.domain-v0.refund-invalid-type.policy",
+        "stage": "policy",
+        "outcome": "error"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.refund-invalid-type",
+      "functionId": "function.domain-v0.refund",
+      "policyId": "policy.domain-v0.refund",
+      "inputPaths": ["order.status", "order.total"],
+      "ruleIds": ["rule.domain-v0.refund.allow-paid-under-limit"]
+    }
+  }
+}

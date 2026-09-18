@@ -1,0 +1,59 @@
+{
+  "id": "fixture.domain-v0.account-conflict",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "conflict",
+  "functionId": "function.domain-v0.account-review",
+  "description": "High risk and trusted country both match at priority 200, so the result is a conflict.",
+  "input": {
+    "account": {"state": "active", "riskScore": 60, "country": "JP"}
+  },
+  "expected": {
+    "status": "conflict",
+    "value": null,
+    "matchedRuleIds": [
+      "rule.domain-v0.account-review.deny-high-risk",
+      "rule.domain-v0.account-review.allow-trusted-country"
+    ],
+    "unresolvedPaths": [],
+    "errors": [
+      {
+        "code": "RULE_CONFLICT",
+        "message": "Rules at the highest priority disagree.",
+        "ruleIds": [
+          "rule.domain-v0.account-review.deny-high-risk",
+          "rule.domain-v0.account-review.allow-trusted-country"
+        ]
+      }
+    ],
+    "trace": [
+      {
+        "id": "trace.domain-v0.account-conflict.deny-rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.deny-high-risk",
+        "outcome": "deny"
+      },
+      {
+        "id": "trace.domain-v0.account-conflict.allow-rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.allow-trusted-country",
+        "outcome": "allow"
+      },
+      {
+        "id": "trace.domain-v0.account-conflict.policy",
+        "stage": "policy",
+        "outcome": "conflict"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.account-conflict",
+      "functionId": "function.domain-v0.account-review",
+      "policyId": "policy.domain-v0.account-review",
+      "inputPaths": ["account.state", "account.riskScore", "account.country"],
+      "ruleIds": [
+        "rule.domain-v0.account-review.deny-high-risk",
+        "rule.domain-v0.account-review.allow-trusted-country"
+      ]
+    }
+  }
+}

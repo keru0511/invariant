@@ -1,0 +1,257 @@
+{
+  "contractVersion": "domain-v0",
+  "kind": "function-catalog",
+  "functions": [
+    {
+      "id": "function.domain-v0.member-age",
+      "name": "member-age",
+      "description": "Decide whether a member is an adult from an integer age.",
+      "inputs": [
+        {"path": "user.age", "type": "number", "required": true}
+      ],
+      "policy": {
+        "id": "policy.domain-v0.member-age",
+        "defaultStatus": "unresolved",
+        "resolution": {
+          "priority": "highest",
+          "unresolved": "unresolved",
+          "conflict": "conflict",
+          "noMatch": "default"
+        },
+        "rules": [
+          {
+            "id": "rule.domain-v0.member-age.allow-adult",
+            "priority": 100,
+            "when": {
+              "id": "node.domain-v0.member-age.allow-adult.compare",
+              "kind": "compare",
+              "operator": "gte",
+              "left": {
+                "id": "node.domain-v0.member-age.allow-adult.input-age",
+                "kind": "input",
+                "path": "user.age"
+              },
+              "right": {
+                "id": "node.domain-v0.member-age.allow-adult.literal-18",
+                "kind": "literal",
+                "value": 18
+              }
+            },
+            "then": "allow"
+          },
+          {
+            "id": "rule.domain-v0.member-age.deny-minor",
+            "priority": 100,
+            "when": {
+              "id": "node.domain-v0.member-age.deny-minor.compare",
+              "kind": "compare",
+              "operator": "lt",
+              "left": {
+                "id": "node.domain-v0.member-age.deny-minor.input-age",
+                "kind": "input",
+                "path": "user.age"
+              },
+              "right": {
+                "id": "node.domain-v0.member-age.deny-minor.literal-18",
+                "kind": "literal",
+                "value": 18
+              }
+            },
+            "then": "deny"
+          }
+        ]
+      }
+    },
+    {
+      "id": "function.domain-v0.refund",
+      "name": "refund",
+      "description": "Decide whether a paid order is refundable under the amount limit.",
+      "inputs": [
+        {"path": "order.status", "type": "string", "required": true},
+        {"path": "order.total", "type": "number", "required": true}
+      ],
+      "policy": {
+        "id": "policy.domain-v0.refund",
+        "defaultStatus": "deny",
+        "resolution": {
+          "priority": "highest",
+          "unresolved": "unresolved",
+          "conflict": "conflict",
+          "noMatch": "default"
+        },
+        "rules": [
+          {
+            "id": "rule.domain-v0.refund.allow-paid-under-limit",
+            "priority": 100,
+            "when": {
+              "id": "node.domain-v0.refund.allow-paid-under-limit.and",
+              "kind": "logical",
+              "operator": "and",
+              "operands": [
+                {
+                  "id": "node.domain-v0.refund.allow-paid-under-limit.status-eq",
+                  "kind": "compare",
+                  "operator": "eq",
+                  "left": {
+                    "id": "node.domain-v0.refund.allow-paid-under-limit.input-status",
+                    "kind": "input",
+                    "path": "order.status"
+                  },
+                  "right": {
+                    "id": "node.domain-v0.refund.allow-paid-under-limit.literal-paid",
+                    "kind": "literal",
+                    "value": "paid"
+                  }
+                },
+                {
+                  "id": "node.domain-v0.refund.allow-paid-under-limit.total-lte",
+                  "kind": "compare",
+                  "operator": "lte",
+                  "left": {
+                    "id": "node.domain-v0.refund.allow-paid-under-limit.input-total",
+                    "kind": "input",
+                    "path": "order.total"
+                  },
+                  "right": {
+                    "id": "node.domain-v0.refund.allow-paid-under-limit.literal-100",
+                    "kind": "literal",
+                    "value": 100
+                  }
+                }
+              ]
+            },
+            "then": "allow"
+          },
+          {
+            "id": "rule.domain-v0.refund.deny-over-limit-or-refunded",
+            "priority": 50,
+            "when": {
+              "id": "node.domain-v0.refund.deny-over-limit-or-refunded.or",
+              "kind": "logical",
+              "operator": "or",
+              "operands": [
+                {
+                  "id": "node.domain-v0.refund.deny-over-limit-or-refunded.status-eq",
+                  "kind": "compare",
+                  "operator": "eq",
+                  "left": {
+                    "id": "node.domain-v0.refund.deny-over-limit-or-refunded.input-status",
+                    "kind": "input",
+                    "path": "order.status"
+                  },
+                  "right": {
+                    "id": "node.domain-v0.refund.deny-over-limit-or-refunded.literal-refunded",
+                    "kind": "literal",
+                    "value": "refunded"
+                  }
+                },
+                {
+                  "id": "node.domain-v0.refund.deny-over-limit-or-refunded.total-gt",
+                  "kind": "compare",
+                  "operator": "gt",
+                  "left": {
+                    "id": "node.domain-v0.refund.deny-over-limit-or-refunded.input-total",
+                    "kind": "input",
+                    "path": "order.total"
+                  },
+                  "right": {
+                    "id": "node.domain-v0.refund.deny-over-limit-or-refunded.literal-100",
+                    "kind": "literal",
+                    "value": 100
+                  }
+                }
+              ]
+            },
+            "then": "deny"
+          }
+        ]
+      }
+    },
+    {
+      "id": "function.domain-v0.account-review",
+      "name": "account-review",
+      "description": "Decide whether an account can proceed, needs review, or conflicts between rules.",
+      "inputs": [
+        {"path": "account.state", "type": "string", "required": true},
+        {"path": "account.riskScore", "type": "number", "required": true},
+        {"path": "account.country", "type": "string", "required": true}
+      ],
+      "policy": {
+        "id": "policy.domain-v0.account-review",
+        "defaultStatus": "unresolved",
+        "resolution": {
+          "priority": "highest",
+          "unresolved": "unresolved",
+          "conflict": "conflict",
+          "noMatch": "default"
+        },
+        "rules": [
+          {
+            "id": "rule.domain-v0.account-review.allow-not-suspended",
+            "priority": 100,
+            "when": {
+              "id": "node.domain-v0.account-review.allow-not-suspended.not",
+              "kind": "not",
+              "operand": {
+                "id": "node.domain-v0.account-review.allow-not-suspended.state-eq",
+                "kind": "compare",
+                "operator": "eq",
+                "left": {
+                  "id": "node.domain-v0.account-review.allow-not-suspended.input-state",
+                  "kind": "input",
+                  "path": "account.state"
+                },
+                "right": {
+                  "id": "node.domain-v0.account-review.allow-not-suspended.literal-suspended",
+                  "kind": "literal",
+                  "value": "suspended"
+                }
+              }
+            },
+            "then": "allow"
+          },
+          {
+            "id": "rule.domain-v0.account-review.deny-high-risk",
+            "priority": 200,
+            "when": {
+              "id": "node.domain-v0.account-review.deny-high-risk.compare",
+              "kind": "compare",
+              "operator": "gte",
+              "left": {
+                "id": "node.domain-v0.account-review.deny-high-risk.input-risk-score",
+                "kind": "input",
+                "path": "account.riskScore"
+              },
+              "right": {
+                "id": "node.domain-v0.account-review.deny-high-risk.literal-50",
+                "kind": "literal",
+                "value": 50
+              }
+            },
+            "then": "deny"
+          },
+          {
+            "id": "rule.domain-v0.account-review.allow-trusted-country",
+            "priority": 200,
+            "when": {
+              "id": "node.domain-v0.account-review.allow-trusted-country.compare",
+              "kind": "compare",
+              "operator": "eq",
+              "left": {
+                "id": "node.domain-v0.account-review.allow-trusted-country.input-country",
+                "kind": "input",
+                "path": "account.country"
+              },
+              "right": {
+                "id": "node.domain-v0.account-review.allow-trusted-country.literal-jp",
+                "kind": "literal",
+                "value": "JP"
+              }
+            },
+            "then": "allow"
+          }
+        ]
+      }
+    }
+  ]
+}
