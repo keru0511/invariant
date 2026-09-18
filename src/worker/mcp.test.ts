@@ -31,6 +31,7 @@ const parsedCatalog = (() => {
 
 function createFakeWorkspaceRepository(options: {
   readonly authorizedWorkspace?: string;
+  readonly model?: DomainVersionRecord['model'];
   readonly load?: (input: { readonly domainId: string; readonly versionId: string }) => Promise<DomainVersionRecord>;
 } = {}) {
   const authorizedWorkspace = options.authorizedWorkspace ?? 'workspace-a';
@@ -50,7 +51,7 @@ function createFakeWorkspaceRepository(options: {
             workspaceId,
             domainId: input.domainId,
             versionId: input.versionId,
-            model: parsedCatalog,
+            model: options.model ?? parsedCatalog,
             publishedAt: '2026-09-18T00:00:00.000Z',
           };
         },
@@ -330,6 +331,42 @@ describe('MCP ハンドラー (/mcp)', () => {
       { operation: 'authorize', workspaceId: 'workspace-a' },
       { operation: 'loadVersion', workspaceId: 'workspace-a' },
     ]);
+  });
+
+  it('AC: ambiguous function names are returned as ambiguous', async () => {
+    const ambiguousInput = JSON.parse(JSON.stringify(functionCatalog)) as {
+      functions: Array<{ name: string }>;
+    };
+    ambiguousInput.functions[1].name = ambiguousInput.functions[0].name;
+    const ambiguousCatalog = parseDomain(ambiguousInput);
+    if (!ambiguousCatalog.ok) throw new Error(ambiguousCatalog.error.message);
+
+    const request = createModernRequest({
+      method: 'tools/call',
+      name: 'domain.evaluate',
+      params: {
+        name: 'domain.evaluate',
+        arguments: {
+          workspace: 'workspace-a',
+          domain: 'orders',
+          version: 'v1',
+          function: 'member-age',
+          args: { user: { age: 21 } },
+        },
+      },
+    });
+    const response = await handleMcpRequest(request, TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: createFakeWorkspaceRepository({ model: ambiguousCatalog.value }),
+    });
+    const body = await response.json() as { readonly result: { readonly content: readonly [{ readonly text: string }] } };
+    const result = JSON.parse(body.result.content[0].text);
+
+    expect(result).toMatchObject({
+      status: 'ambiguous',
+      errors: [{ code: 'INVALID_FUNCTION' }],
+    });
+    expect(result.errors[0].message).toContain('ambiguous');
   });
 
   it('AC: cross-workspace access does not leak existence or load data', async () => {
