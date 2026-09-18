@@ -180,6 +180,15 @@ export function verifySnapshotHead(expectedSha, actualSha) {
   }
 }
 
+export function assertCallerHeadUnchanged(expectedSha, actualSha) {
+  if (!expectedSha || !actualSha || expectedSha !== actualSha) {
+    throw new GateError(
+      'caller-changed',
+      `caller HEAD changed during run: ${expectedSha || '<missing>'} -> ${actualSha || '<missing>'}`,
+    );
+  }
+}
+
 function getRecordWorkflowName(record) {
   return record?.workflowName;
 }
@@ -386,7 +395,7 @@ export async function assertExactToolchain(repoRoot, {
   return { runnerPath, npmVersion, nodeVersion, actrunVersion: installed.version };
 }
 
-async function createSnapshot(repoRoot, capturedHeadSha) {
+export async function createSnapshot(repoRoot, capturedHeadSha) {
   const parent = await mkdtemp(join(tmpdir(), 'invariant-ci-local-'));
   const snapshot = join(parent, 'snapshot');
   try {
@@ -400,7 +409,7 @@ async function createSnapshot(repoRoot, capturedHeadSha) {
   }
 }
 
-async function removeSnapshot(repoRoot, snapshotInfo) {
+export async function removeSnapshot(repoRoot, snapshotInfo) {
   if (!snapshotInfo) return;
   try {
     await runGit(['worktree', 'remove', '--force', snapshotInfo.snapshot], repoRoot);
@@ -475,7 +484,6 @@ export async function runGate({
   const command = [
     WORKFLOW_PATH,
     '--trigger', LOCAL_TRIGGER,
-    '--repo', snapshotInfo.snapshot,
     '--workspace-mode', 'worktree',
     '--run-root', runRoot,
   ];
@@ -526,9 +534,7 @@ export async function runGate({
   let finalStatusError;
   try {
     const finalHeadSha = await runGit(['rev-parse', 'HEAD'], repoRoot);
-    if (finalHeadSha !== capturedHeadSha) {
-      throw new GateError('caller-changed', `caller HEAD changed during run: ${capturedHeadSha} -> ${finalHeadSha}`);
-    }
+    assertCallerHeadUnchanged(capturedHeadSha, finalHeadSha);
     assertCleanStatus(await readCallerStatus(repoRoot));
   } catch (error) {
     finalStatusError = error;

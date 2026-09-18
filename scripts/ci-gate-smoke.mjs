@@ -126,6 +126,25 @@ async function readSingleRecord(runRoot) {
   return { path, runId: directories[0].name, record };
 }
 
+async function verifyActrunWorkspaceCleanup(fixture) {
+  const worktrees = await run('git', ['worktree', 'list', '--porcelain'], fixture);
+  if (worktrees.exitCode !== 0) {
+    throw new Error(`cannot inspect fixture worktrees: ${worktrees.stderr || worktrees.stdout}`);
+  }
+  const worktreeEntries = worktrees.stdout.split(/\n(?=worktree )/).filter(Boolean);
+  const workspaceRoot = join(fixture, '_build', 'actrun', 'workspace');
+  let nestedEntries = [];
+  try {
+    nestedEntries = (await readdir(workspaceRoot, { withFileTypes: true })).map((entry) => entry.name);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (worktreeEntries.length !== 1 || nestedEntries.length !== 0) {
+    throw new Error(`actrun workspace cleanup failed: ${JSON.stringify({ worktreeEntries, nestedEntries })}`);
+  }
+  return { worktreeCount: worktreeEntries.length, nestedWorkspaceEntries: nestedEntries };
+}
+
 function mandatoryStepStatus(record, stepId) {
   return record.steps?.find((step) => step.id === `quality/${stepId}`)?.status;
 }
@@ -136,7 +155,6 @@ async function smokeFixture({ fixture, sha, root, name, expectedFailureStep = nu
   const args = [
     'workflow', 'run', '.github/workflows/ci.yml',
     '--trigger', 'push',
-    '--repo', fixture,
     '--workspace-mode', 'worktree',
     '--run-root', runRoot,
   ];
@@ -154,36 +172,43 @@ async function smokeFixture({ fixture, sha, root, name, expectedFailureStep = nu
     };
   }
 
-  const run = await readSingleRecord(runRoot);
+  let runRecord;
+  try {
+    runRecord = await readSingleRecord(runRoot);
+  } catch (error) {
+    throw new Error(`fixture ${name} produced no readable run record: ${JSON.stringify({ result, error: error.message }, null, 2)}`);
+  }
   const actualFailureStep = expectedFailureStep
-    ? ['install', 'typecheck', 'tests'].find((stepId) => mandatoryStepStatus(run.record, stepId) === 'failed') ?? null
+    ? ['install', 'typecheck', 'tests'].find((stepId) => mandatoryStepStatus(runRecord.record, stepId) === 'failed') ?? null
     : null;
   const success = expectedFailureStep === null
     ? result.exitCode === 0
-      && run.record.event === 'push'
-      && run.record.headSha === sha
-      && run.record.state === 'completed'
-      && run.record.conclusion === 'success'
-      && run.record.ok === true
-      && ['install', 'typecheck', 'tests'].every((stepId) => mandatoryStepStatus(run.record, stepId) === 'success')
+      && runRecord.record.event === 'push'
+      && runRecord.record.headSha === sha
+      && runRecord.record.state === 'completed'
+      && runRecord.record.conclusion === 'success'
+      && runRecord.record.ok === true
+      && ['install', 'typecheck', 'tests'].every((stepId) => mandatoryStepStatus(runRecord.record, stepId) === 'success')
     : result.exitCode !== 0
-      && run.record.event === 'push'
-      && run.record.headSha === sha
-      && run.record.conclusion === 'failure'
+      && runRecord.record.event === 'push'
+      && runRecord.record.headSha === sha
+      && runRecord.record.conclusion === 'failure'
       && actualFailureStep === expectedFailureStep;
   if (!success) {
-    throw new Error(`fixture ${name} did not meet expected result: ${JSON.stringify({ result, run }, null, 2)}`);
+    throw new Error(`fixture ${name} did not meet expected result: ${JSON.stringify({ result, run: runRecord }, null, 2)}`);
   }
+  const cleanup = await verifyActrunWorkspaceCleanup(fixture);
   return {
     name,
     command: `${runner} ${args.join(' ')}`,
     testedSha: sha,
-    runId: run.runId,
-    runRecord: run.path,
+    runId: runRecord.runId,
+    runRecord: runRecord.path,
     exitCode: result.exitCode,
     blocked: false,
     expectedFailureStep,
     actualFailureStep,
+    cleanup,
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim(),
   };
