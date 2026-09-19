@@ -65,31 +65,54 @@ const domainV0ConflictResult = {
       'rule.domain-v0.account-review.allow-trusted-country',
     ],
   },
-};
+} as const;
 
 const domainV0AmbiguousResult = {
-  // Domain v0 records the same lack of a unique outcome as a policy-level
-  // unresolved result; the record keeps the distinct ambiguity state and the
-  // candidate alternatives in the result payload.
   status: 'ambiguous',
   value: null,
-  candidateAlternativeIds: ['queue', 'direct'],
-  matchedRuleIds: [],
+  matchedRuleIds: [
+    'rule.domain-v0.account-review.allow-review-state',
+    'rule.domain-v0.account-review.allow-trusted-country',
+  ],
   unresolvedPaths: [],
-  errors: [],
-  trace: [{
-    id: 'trace.domain-v0.account-ambiguous.policy',
-    stage: 'policy',
-    outcome: 'unresolved',
+  errors: [{
+    code: 'AMBIGUOUS_MATCH',
+    message: 'Multiple highest-priority rules agree but do not identify a unique decision.',
+    ruleIds: [
+      'rule.domain-v0.account-review.allow-review-state',
+      'rule.domain-v0.account-review.allow-trusted-country',
+    ],
   }],
+  trace: [
+    {
+      id: 'trace.domain-v0.account-ambiguous-multiple-allows.review-state-rule',
+      stage: 'rule',
+      ruleId: 'rule.domain-v0.account-review.allow-review-state',
+      outcome: 'allow',
+    },
+    {
+      id: 'trace.domain-v0.account-ambiguous-multiple-allows.trusted-country-rule',
+      stage: 'rule',
+      ruleId: 'rule.domain-v0.account-review.allow-trusted-country',
+      outcome: 'allow',
+    },
+    {
+      id: 'trace.domain-v0.account-ambiguous-multiple-allows.policy',
+      stage: 'policy',
+      outcome: 'ambiguous',
+    },
+  ],
   provenance: {
-    fixtureId: 'fixture.domain-v0.account-ambiguous',
+    fixtureId: 'fixture.domain-v0.account-ambiguous-multiple-allows',
     functionId: 'function.domain-v0.account-review',
     policyId: 'policy.domain-v0.account-review',
     inputPaths: ['account.state', 'account.riskScore', 'account.country'],
-    ruleIds: [],
+    ruleIds: [
+      'rule.domain-v0.account-review.allow-review-state',
+      'rule.domain-v0.account-review.allow-trusted-country',
+    ],
   },
-};
+} as const;
 
 describe('DecisionRecord', () => {
   it('round-trips a resolved record with result, trace, snapshot, and recommendation', () => {
