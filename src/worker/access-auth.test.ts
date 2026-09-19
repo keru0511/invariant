@@ -66,6 +66,20 @@ async function createAccessToken(
   return `${encodedHeader}.${encodedPayload}.${encodeBase64Url(new Uint8Array(signature))}`;
 }
 
+function tamperSignature(token: string): string {
+  const segments = token.split('.');
+  if (segments.length !== 3 || segments[2].length === 0) {
+    throw new Error('expected a JWT with a non-empty signature');
+  }
+
+  // Mutate the first signature character. Mutating only the final base64url
+  // character can leave the decoded signature unchanged because its trailing
+  // bits may be padding bits.
+  const replacement = segments[2][0] === 'A' ? 'B' : 'A';
+  segments[2] = `${replacement}${segments[2].slice(1)}`;
+  return segments.join('.');
+}
+
 function createModernPingRequest(token?: string): Request {
   const headers: Record<string, string> = {
     Origin: 'http://localhost:5173',
@@ -158,12 +172,16 @@ describe('Cloudflare Access provider boundary', () => {
     });
   });
 
-  it('rejects missing, forged, expired, wrong-issuer, and wrong-audience identities', async () => {
+  it('rejects a signature mutation that changes decoded signature bytes', async () => {
     const validToken = await createAccessToken();
-    const forgedToken = `${validToken.slice(0, -1)}${validToken.endsWith('A') ? 'B' : 'A'}`;
+    const forgedToken = tamperSignature(validToken);
 
-    await expectUnauthorized(createModernPingRequest());
+    expect(forgedToken).not.toBe(validToken);
     await expectUnauthorized(createModernPingRequest(forgedToken));
+  });
+
+  it('rejects missing, expired, wrong-issuer, and wrong-audience identities', async () => {
+    await expectUnauthorized(createModernPingRequest());
     await expectUnauthorized(createModernPingRequest(await createAccessToken({ exp: NOW })));
     await expectUnauthorized(
       createModernPingRequest(await createAccessToken({ iss: 'https://other.cloudflareaccess.com' }))
