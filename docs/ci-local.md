@@ -13,9 +13,9 @@
 | `actions/checkout` | `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`) |
 | `actions/setup-node` | `49933ea5288caeca8642d1e84afbd3f7d6820020` (`v4.4.0`) |
 
-The approved dual-trigger workflow retains `workflow_dispatch` for manual GitHub runs and adds `push` with `branches-ignore: ['**']`. GitHub therefore does not run the workflow for ordinary branch pushes, while the local gate explicitly invokes actrun with `--trigger push`. actrun 0.32.0 reports that it skips trigger matching for this explicit local event. The local `actrun.toml` skips the two setup actions because the gate has already created a detached snapshot and has checked the exact Node/npm prerequisite before starting the runner. Hosted GitHub Actions still sees the pinned setup actions.
+The approved dual-trigger workflow retains `workflow_dispatch` for manual GitHub runs and adds `push` with `branches-ignore: ['**']`. GitHub therefore does not run the workflow for ordinary branch pushes, while the local gate explicitly invokes actrun with `--trigger push`. actrun 0.32.0 reports that it skips trigger matching for this explicit local event. The local `actrun.toml` skips the two setup actions because the gate has already created a detached snapshot and has checked the exact Node version plus an npm major compatible with the pinned setup step. Both hosted GitHub Actions and local actrun then execute the same `npm install --global npm@11.9.0` toolchain step before `npm ci`.
 
-The wrapper validates this workflow shape before creating a snapshot. `ACTION_REVISIONS` is an allowlist, not documentation only: `actions/checkout` and `actions/setup-node` must each occur exactly once and must use the exact full SHAs above. Tag or branch refs, another SHA, a missing or duplicate action step, any other `uses` entry, and any extra job or step fail closed with `workflow-contract`. The approved workflow has exactly one `quality` job and the ordered steps `checkout`, `setup-node`, `install`, `typecheck`, and `tests`; no other action is accepted.
+The wrapper validates this workflow shape before creating a snapshot. `ACTION_REVISIONS` is an allowlist, not documentation only: `actions/checkout` and `actions/setup-node` must each occur exactly once and must use the exact full SHAs above. Tag or branch refs, another SHA, a missing or duplicate action step, any other `uses` entry, and any extra job or step fail closed with `workflow-contract`. The approved workflow has exactly one `quality` job and the ordered steps `checkout`, `setup-node`, `npm`, `install`, `typecheck`, and `tests`; no other action is accepted. The `npm` step installs and verifies the exact npm `11.9.0` pin before any quality command.
 
 ## Gate invariants
 
@@ -24,7 +24,7 @@ Before the runner starts, the wrapper:
 1. validates the committed workflow contract;
 2. rejects staged, unstaged, non-ignored untracked, and undeclared ignored paths;
 3. captures `git rev-parse HEAD`;
-4. verifies the exact Node, npm, package manifest, lockfile, and caller-installed actrun binary;
+4. verifies the exact Node, a usable npm 11 preflight, package manifest, lockfile, and caller-installed actrun binary; the shared workflow pins npm `11.9.0` before install;
 5. creates a detached temporary worktree at the captured SHA; and
 6. launches that snapshot with actrun's `worktree` workspace mode.
 
