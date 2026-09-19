@@ -118,4 +118,44 @@ describe('OpenAI-compatible conversation patch adapter', () => {
     const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider, { timeoutMs: 100 });
     expect(result).toMatchObject({ ok: false, error: { code: 'PROVIDER_TIMEOUT' } });
   });
+  it('forwards bounded-repair metadata without changing the structured schema', async () => {
+    let receivedInit: RequestInit | undefined;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      receivedInit = init;
+      return response({ choices: [{ message: { parsed: output } }] });
+    });
+    const provider = createOpenAICompatibleProvider({
+      baseUrl: 'https://example.invalid/v1',
+      apiKey: 'secret',
+      model: 'model',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    const signal = new AbortController().signal;
+    const repair = {
+      previousAttempt: 1 as const,
+      diagnostics: [{ code: 'MALFORMED_OUTPUT', path: '$.patch', message: 'invalid candidate' }],
+    };
+    await expect(provider.generate({ ...request(), signal, attempt: 2, repair })).resolves.toEqual(output);
+
+    const body = JSON.parse(String(receivedInit?.body)) as Record<string, any>;
+    const metadata = JSON.parse(String((body.messages as Array<{ content: string }>).at(-1)?.content)) as Record<string, unknown>;
+    expect(metadata).toEqual({
+      currentDomainVersion: 'domain-v0',
+      unresolvedItems: [],
+      attempt: 2,
+      repair,
+    });
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: {
+        name: 'conversation_domain_patch',
+        strict: true,
+        schema: CONVERSATION_PATCH_OUTPUT_SCHEMA,
+      },
+    });
+    expect(receivedInit?.signal).toBeInstanceOf(AbortSignal);
+  });
+
 });
+
+

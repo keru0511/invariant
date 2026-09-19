@@ -75,6 +75,8 @@ function requestBody(request: ConversationPatchProviderRequest, model: string): 
         content: JSON.stringify({
           currentDomainVersion: request.currentDomainVersion,
           unresolvedItems: request.unresolvedItems,
+          ...(request.attempt === undefined ? {} : { attempt: request.attempt }),
+          ...(request.repair === undefined ? {} : { repair: request.repair }),
         }),
       },
     ],
@@ -136,7 +138,25 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
   return {
     async generate(request): Promise<unknown> {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let callerCancelled = false;
+      const onCallerAbort = () => {
+        callerCancelled = true;
+        controller.abort();
+      };
+      if (request.signal) {
+        if (request.signal.aborted) {
+          callerCancelled = true;
+          controller.abort();
+        } else {
+          request.signal.addEventListener('abort', onCallerAbort, { once: true });
+        }
+      }
+
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
       try {
         let response: Response;
         try {
@@ -150,10 +170,16 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
             signal: controller.signal,
           });
         } catch (error) {
-          if (controller.signal.aborted || isAbortError(error)) {
+          if (callerCancelled) {
+            throw providerError('cancelled', 'Provider request was cancelled.');
+          }
+          if (timedOut || controller.signal.aborted || isAbortError(error)) {
             throw providerError('timeout', 'Provider request timed out.');
           }
           throw providerError('provider', 'Provider request failed.');
+        }
+        if (callerCancelled) {
+          throw providerError('cancelled', 'Provider request was cancelled.');
         }
         if (!response.ok) {
           throw providerError('provider', 'Provider returned a non-success HTTP status.', response.status);
@@ -167,6 +193,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
         return extractStructuredOutput(payload);
       } finally {
         clearTimeout(timer);
+        if (request.signal) request.signal.removeEventListener('abort', onCallerAbort);
       }
     },
   };
@@ -184,3 +211,5 @@ export function createOpenAICompatibleProviderFromEnv(
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
 }
+
+

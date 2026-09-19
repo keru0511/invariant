@@ -4,6 +4,7 @@ import memberAgeBoundary from '../../fixtures/domain-v0/cases/member-age-boundar
 import {
   CONVERSATION_PATCH_OUTPUT_SCHEMA,
   generateValidatedDomainPatch,
+  type ConversationPatchClock,
   type ConversationPatchProvider,
   type ConversationPatchProviderRequest,
 } from './conversation-patch';
@@ -18,6 +19,47 @@ const provenance = { source: 'conversation', actor: 'fake-provider', reference: 
 
 function providerReturning(output: unknown): ConversationPatchProvider {
   return { generate: async (_request: ConversationPatchProviderRequest) => output };
+}
+
+function providerSequence(outputs: readonly unknown[]) {
+  const requests: ConversationPatchProviderRequest[] = [];
+  const provider: ConversationPatchProvider = {
+    generate: async (request) => {
+      requests.push(request);
+      return outputs[Math.min(requests.length - 1, outputs.length - 1)];
+    },
+  };
+  return { provider, requests };
+}
+
+class FakeClock implements ConversationPatchClock {
+  private nextHandle = 0;
+  private readonly timers = new Map<number, { readonly dueAt: number; readonly handler: () => void }>();
+  now = 0;
+
+  setTimeout(handler: () => void, timeoutMs: number): number {
+    const handle = this.nextHandle;
+    this.nextHandle += 1;
+    this.timers.set(handle, { dueAt: this.now + timeoutMs, handler });
+    return handle;
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.timers.delete(handle as number);
+  }
+
+  advance(timeoutMs: number): void {
+    this.now += timeoutMs;
+    const due = [...this.timers.entries()].filter(([, timer]) => timer.dueAt <= this.now);
+    for (const [handle, timer] of due) {
+      this.timers.delete(handle);
+      timer.handler();
+    }
+  }
+
+  get pendingCount(): number {
+    return this.timers.size;
+  }
 }
 
 function patch(operations: readonly unknown[]) {
@@ -84,7 +126,7 @@ describe('conversation-to-validated-patch', () => {
     };
     const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, providerReturning(invented));
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('MALFORMED_OUTPUT');
+    if (!result.ok) expect(result.error.code).toBe('REPAIR_EXHAUSTED');
   });
 
   it('rejects unknown source references and provenance', async () => {
@@ -96,7 +138,7 @@ describe('conversation-to-validated-patch', () => {
       operationEvidence: [{ operationIndex: 0, sourceReferences: ['turn-missing'] }],
     };
     const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, providerReturning(output));
-    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_SOURCE_REFERENCE' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'REPAIR_EXHAUSTED', attempts: 2 } });
   });
 
   it('malformed provider output is rejected without model mutation', async () => {
@@ -104,7 +146,7 @@ describe('conversation-to-validated-patch', () => {
     const before = JSON.stringify(current);
     const result = await generateValidatedDomainPatch({ conversation, currentDomain: current, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, providerReturning({ patch: { kind: 'domain-patch' }, operationEvidence: [] }));
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('MALFORMED_OUTPUT');
+    if (!result.ok) expect(result.error.code).toBe('REPAIR_EXHAUSTED');
     expect(JSON.stringify(current)).toBe(before);
   });
 
@@ -128,4 +170,103 @@ describe('conversation-to-validated-patch', () => {
     expect(received?.outputSchema).toBe(CONVERSATION_PATCH_OUTPUT_SCHEMA);
     expect(received?.currentDomainVersion).toBe('domain-v0');
   });
+
+  it('valid first response uses exactly one provider call', async () => {
+    const output = { patch: patch([]), operationEvidence: [] };
+    const sequence = providerSequence([output]);
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, sequence.provider);
+    expect(result.ok).toBe(true);
+    expect(sequence.requests).toHaveLength(1);
+    expect(sequence.requests[0]).toMatchObject({ attempt: 1 });
+    expect(sequence.requests[0].repair).toBeUndefined();
+  });
+
+  it('invalid then valid response retries once with structured diagnostics', async () => {
+    const invalid = { patch: { kind: 'domain-patch' }, operationEvidence: [] };
+    const valid = { patch: patch([]), operationEvidence: [] };
+    const sequence = providerSequence([invalid, valid]);
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, sequence.provider);
+    expect(result.ok).toBe(true);
+    expect(sequence.requests).toHaveLength(2);
+    expect(sequence.requests[1].attempt).toBe(2);
+    expect(sequence.requests[1].repair).toEqual({
+      previousAttempt: 1,
+      diagnostics: [{ code: 'INVALID_PATCH', path: '$.contractVersion', message: 'Unsupported Domain Patch contract version.' }],
+    });
+  });
+
+  it('two invalid responses return typed exhausted failure without mutation', async () => {
+    const current = JSON.parse(JSON.stringify(functionCatalog));
+    const before = JSON.stringify(current);
+    const invalid = { patch: { kind: 'domain-patch' }, operationEvidence: [] };
+    const sequence = providerSequence([invalid, invalid]);
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain: current, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, sequence.provider);
+    expect(result).toMatchObject({ ok: false, error: { code: 'REPAIR_EXHAUSTED', attempts: 2 } });
+    if (!result.ok) expect(result.error.attemptDiagnostics).toHaveLength(2);
+    expect(sequence.requests).toHaveLength(2);
+    expect(JSON.stringify(current)).toBe(before);
+  });
+
+  it('repair does not invent missing definitions', async () => {
+    const invalid = {
+      patch: patch([{ op: 'add_type', type: { id: 'type.invented.country', name: 'Country', description: 'Invented without a source.', baseType: 'string' } }]),
+      operationEvidence: [],
+    };
+    const sequence = providerSequence([invalid, invalid]);
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, sequence.provider);
+    expect(result.ok).toBe(false);
+    expect(sequence.requests).toHaveLength(2);
+    expect(sequence.requests[1].repair?.diagnostics[0].code).toBe('MALFORMED_OUTPUT');
+  });
+
+  it('provider timeout is bounded to one attempt by the fake clock', async () => {
+    const clock = new FakeClock();
+    let calls = 0;
+    const provider: ConversationPatchProvider = {
+      generate: async () => {
+        calls += 1;
+        return new Promise(() => undefined);
+      },
+    };
+    const pending = generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider, { timeoutMs: 10, clock });
+    expect(calls).toBe(1);
+    expect(clock.pendingCount).toBe(1);
+    clock.advance(9);
+    expect(calls).toBe(1);
+    clock.advance(1);
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'PROVIDER_TIMEOUT', attempts: 1 } });
+    expect(calls).toBe(1);
+    expect(clock.pendingCount).toBe(0);
+  });
+
+  it('invalid repair is bounded to two attempts and one timeout window', async () => {
+    const clock = new FakeClock();
+    const invalid = { patch: { kind: 'domain-patch' }, operationEvidence: [] };
+    const sequence = providerSequence([invalid, new Promise(() => undefined)]);
+    const pending = generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, sequence.provider, { timeoutMs: 7, clock });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sequence.requests).toHaveLength(2);
+    expect(clock.pendingCount).toBe(1);
+    clock.advance(7);
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'PROVIDER_TIMEOUT', attempts: 2 } });
+    expect(sequence.requests).toHaveLength(2);
+  });
+
+  it('cancellation and provider/config errors remain explicit and bounded', async () => {
+    const cancelled = new AbortController();
+    cancelled.abort();
+    let calls = 0;
+    const provider: ConversationPatchProvider = { generate: async () => { calls += 1; return { patch: patch([]), operationEvidence: [] }; } };
+    const cancelledResult = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider, { signal: cancelled.signal });
+    expect(cancelledResult).toMatchObject({ ok: false, error: { code: 'PROVIDER_CANCELLED', attempts: 1 } });
+    expect(calls).toBe(0);
+    const configResult = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider, { timeoutMs: 0 });
+    expect(configResult).toMatchObject({ ok: false, error: { code: 'CONFIG_ERROR' } });
+    const providerError = await generateValidatedDomainPatch({ conversation, currentDomain: functionCatalog, currentDomainVersion: 'domain-v0', unresolvedItems: [] }, { generate: async () => { throw new Error('unavailable'); } });
+    expect(providerError).toMatchObject({ ok: false, error: { code: 'PROVIDER_ERROR', attempts: 1 } });
+  });
 });
+
+
