@@ -34,6 +34,63 @@ function expectValidationCode(action: () => unknown, code: string): void {
   }
 }
 
+const domainV0ConflictResult = {
+  status: 'conflict',
+  value: null,
+  matchedRuleIds: [
+    'rule.domain-v0.account-review.deny-high-risk',
+    'rule.domain-v0.account-review.allow-trusted-country',
+  ],
+  unresolvedPaths: [],
+  errors: [{
+    code: 'RULE_CONFLICT',
+    message: 'Rules at the highest priority disagree.',
+    ruleIds: [
+      'rule.domain-v0.account-review.deny-high-risk',
+      'rule.domain-v0.account-review.allow-trusted-country',
+    ],
+  }],
+  trace: [{
+    id: 'trace.domain-v0.account-conflict.policy',
+    stage: 'policy',
+    outcome: 'conflict',
+  }],
+  provenance: {
+    fixtureId: 'fixture.domain-v0.account-conflict',
+    functionId: 'function.domain-v0.account-review',
+    policyId: 'policy.domain-v0.account-review',
+    inputPaths: ['account.state', 'account.riskScore', 'account.country'],
+    ruleIds: [
+      'rule.domain-v0.account-review.deny-high-risk',
+      'rule.domain-v0.account-review.allow-trusted-country',
+    ],
+  },
+};
+
+const domainV0AmbiguousResult = {
+  // Domain v0 records the same lack of a unique outcome as a policy-level
+  // unresolved result; the record keeps the distinct ambiguity state and the
+  // candidate alternatives in the result payload.
+  status: 'ambiguous',
+  value: null,
+  candidateAlternativeIds: ['queue', 'direct'],
+  matchedRuleIds: [],
+  unresolvedPaths: [],
+  errors: [],
+  trace: [{
+    id: 'trace.domain-v0.account-ambiguous.policy',
+    stage: 'policy',
+    outcome: 'unresolved',
+  }],
+  provenance: {
+    fixtureId: 'fixture.domain-v0.account-ambiguous',
+    functionId: 'function.domain-v0.account-review',
+    policyId: 'policy.domain-v0.account-review',
+    inputPaths: ['account.state', 'account.riskScore', 'account.country'],
+    ruleIds: [],
+  },
+};
+
 describe('DecisionRecord', () => {
   it('round-trips a resolved record with result, trace, snapshot, and recommendation', () => {
     const record = createDecisionRecord({
@@ -89,6 +146,55 @@ describe('DecisionRecord', () => {
     expect(roundTripped.evaluation.result).toBe(false);
     expect(roundTripped.evaluationTrace[0]?.value).toBe(0);
     expect(roundTripped.recommendationId).toBeNull();
+    expect(decisionRecordEquals(record, roundTripped)).toBe(true);
+  });
+
+  it.each([
+    {
+      status: 'ambiguous' as const,
+      result: domainV0AmbiguousResult,
+      message: 'Two alternatives remain equally admissible.',
+    },
+    {
+      status: 'conflict' as const,
+      result: domainV0ConflictResult,
+      message: 'Highest-priority rules disagree.',
+    },
+    {
+      status: 'error' as const,
+      result: {
+        status: 'error',
+        value: null,
+        matchedRuleIds: [],
+        unresolvedPaths: [],
+        errors: [{ code: 'INVALID_AST', message: 'The domain AST is invalid.' }],
+        trace: [],
+        provenance: {
+          fixtureId: 'fixture.domain-v0.refund-invalid-type',
+          functionId: 'function.domain-v0.refund-check',
+          policyId: 'policy.domain-v0.refund-check',
+          inputPaths: ['refund.amount'],
+          ruleIds: [],
+        },
+      },
+      message: 'The evaluator returned an error.',
+    },
+  ])('round-trips the first-class $status state with a null recommendation', ({ status, result, message }) => {
+    const record = createDecisionRecord({
+      domainVersion: 'domain-v0',
+      contextSnapshot: makeContext(),
+      evaluation: {
+        status,
+        result,
+        trace: [{ step: 0, message }],
+      },
+      recommendationId: null,
+    });
+    const roundTripped = DecisionRecord.fromJSON(JSON.parse(JSON.stringify(record)));
+
+    expect(roundTripped.evaluation.status).toBe(status);
+    expect(roundTripped.recommendationId).toBeNull();
+    expect(roundTripped.toJSON()).toEqual(record.toJSON());
     expect(decisionRecordEquals(record, roundTripped)).toBe(true);
   });
 
@@ -250,6 +356,32 @@ describe('DecisionRecord', () => {
         recommendationId: 'queue',
       }),
       'INCONSISTENT_RECORD',
+    );
+    for (const status of ['ambiguous', 'conflict', 'error'] as const) {
+      expectValidationCode(
+        () => DecisionRecord.fromJSON({
+          ...valid,
+          evaluation: { ...valid.evaluation, status },
+          recommendationId: 'queue',
+        }),
+        'INCONSISTENT_RECORD',
+      );
+    }
+    expectValidationCode(
+      () => DecisionRecord.fromJSON({
+        ...valid,
+        evaluation: { ...valid.evaluation, status: 'resolved' },
+        recommendationId: null,
+      }),
+      'INCONSISTENT_RECORD',
+    );
+    expectValidationCode(
+      () => DecisionRecord.fromJSON({
+        ...valid,
+        evaluation: { ...valid.evaluation, status: 'allow' },
+        recommendationId: 'queue',
+      }),
+      'INVALID_VALUE',
     );
     expectValidationCode(
       () => DecisionRecord.fromJSON({
