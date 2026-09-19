@@ -21,3 +21,11 @@ const result = await generateValidatedDomainPatch(input, provider);
 
 Normal tests continue to inject deterministic fake providers. No credentials
 or live network call are required for `npm test`.
+
+The bounded-repair wrapper may add optional `attempt` and structured `repair`
+diagnostics to a provider request. The concrete adapter forwards those fields
+inside the structured request metadata and uses optional `signal` only for
+transport cancellation. Existing injected providers remain valid because the
+adapter boundary and output schema are unchanged.
+
+
