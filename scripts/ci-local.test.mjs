@@ -224,7 +224,7 @@ describe('workflow contract', () => {
   it('rejects an extra or unapproved uses entry', async () => {
     const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     const withExtraUses = source.replace(
-      '        run: npm ci',
+      '        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci',
       '        uses: actions/unapproved@0000000000000000000000000000000000000000\n        run: npm ci',
     );
     expectGateError(() => validateWorkflowDefinition(withExtraUses), 'workflow-contract');
