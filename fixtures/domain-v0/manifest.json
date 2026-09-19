@@ -1,0 +1,52 @@
+{
+  "contractVersion": "domain-v0",
+  "fixtureSetId": "fixture-set.domain-v0",
+  "functionsFile": "functions.json",
+  "fixtures": [
+    {
+      "id": "fixture.domain-v0.member-age-boundary",
+      "path": "cases/member-age-boundary.json",
+      "category": "boundary"
+    },
+    {
+      "id": "fixture.domain-v0.member-age-underage",
+      "path": "cases/member-age-underage.json",
+      "category": "valid"
+    },
+    {
+      "id": "fixture.domain-v0.refund-deny-over-limit",
+      "path": "cases/refund-deny-over-limit.json",
+      "category": "valid"
+    },
+    {
+      "id": "fixture.domain-v0.account-allow-active",
+      "path": "cases/account-allow-active.json",
+      "category": "valid"
+    },
+    {
+      "id": "fixture.domain-v0.account-unresolved-missing-country",
+      "path": "cases/account-unresolved-missing-country.json",
+      "category": "unresolved"
+    },
+    {
+      "id": "fixture.domain-v0.account-conflict",
+      "path": "cases/account-conflict.json",
+      "category": "conflict"
+    },
+    {
+      "id": "fixture.domain-v0.account-ambiguous-multiple-allows",
+      "path": "cases/account-ambiguous-multiple-allows.json",
+      "category": "ambiguous"
+    },
+    {
+      "id": "fixture.domain-v0.refund-invalid-type",
+      "path": "cases/refund-invalid-type.json",
+      "category": "invalid"
+    }
+  ],
+  "supported": {
+    "nodeKinds": ["literal", "input", "compare", "logical", "not"],
+    "operators": ["and", "or", "not", "eq", "lt", "lte", "gt", "gte"],
+    "statuses": ["allow", "deny", "unresolved", "conflict", "ambiguous", "error"]
+  }
+}

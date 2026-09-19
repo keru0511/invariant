@@ -1,0 +1,51 @@
+{
+  "id": "fixture.domain-v0.account-unresolved-missing-country",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "unresolved",
+  "functionId": "function.domain-v0.account-review",
+  "description": "A missing country leaves the highest-priority country rule unresolved; the lower allow rule is not used.",
+  "input": {
+    "account": {"state": "active", "riskScore": 10}
+  },
+  "expected": {
+    "status": "unresolved",
+    "value": null,
+    "matchedRuleIds": [],
+    "unresolvedPaths": ["account.country"],
+    "errors": [
+      {
+        "code": "MISSING_INPUT",
+        "message": "Input 'account.country' is absent.",
+        "path": "account.country",
+        "nodeId": "node.domain-v0.account-review.allow-trusted-country.input-country"
+      }
+    ],
+    "trace": [
+      {
+        "id": "trace.domain-v0.account-unresolved-missing-country.input-country",
+        "stage": "input",
+        "nodeId": "node.domain-v0.account-review.allow-trusted-country.input-country",
+        "outcome": "unresolved"
+      },
+      {
+        "id": "trace.domain-v0.account-unresolved-missing-country.rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.allow-trusted-country",
+        "outcome": "unresolved"
+      },
+      {
+        "id": "trace.domain-v0.account-unresolved-missing-country.policy",
+        "stage": "policy",
+        "outcome": "unresolved"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.account-unresolved-missing-country",
+      "functionId": "function.domain-v0.account-review",
+      "policyId": "policy.domain-v0.account-review",
+      "inputPaths": ["account.state", "account.riskScore", "account.country"],
+      "ruleIds": ["rule.domain-v0.account-review.allow-trusted-country"]
+    }
+  }
+}

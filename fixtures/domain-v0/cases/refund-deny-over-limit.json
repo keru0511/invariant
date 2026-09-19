@@ -1,0 +1,52 @@
+{
+  "id": "fixture.domain-v0.refund-deny-over-limit",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "valid",
+  "functionId": "function.domain-v0.refund",
+  "description": "A paid order over 100 fails the allow rule and matches the deny rule.",
+  "input": {
+    "order": {"status": "paid", "total": 101}
+  },
+  "expected": {
+    "status": "deny",
+    "value": false,
+    "matchedRuleIds": ["rule.domain-v0.refund.deny-over-limit-or-refunded"],
+    "unresolvedPaths": [],
+    "errors": [],
+    "trace": [
+      {
+        "id": "trace.domain-v0.refund-deny-over-limit.allow-and",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.refund.allow-paid-under-limit.and",
+        "operator": "and",
+        "outcome": false,
+        "observed": false
+      },
+      {
+        "id": "trace.domain-v0.refund-deny-over-limit.deny-or",
+        "stage": "operator",
+        "nodeId": "node.domain-v0.refund.deny-over-limit-or-refunded.or",
+        "operator": "or",
+        "outcome": true,
+        "observed": true
+      },
+      {
+        "id": "trace.domain-v0.refund-deny-over-limit.rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.refund.deny-over-limit-or-refunded",
+        "outcome": "deny"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.refund-deny-over-limit",
+      "functionId": "function.domain-v0.refund",
+      "policyId": "policy.domain-v0.refund",
+      "inputPaths": ["order.status", "order.total"],
+      "ruleIds": [
+        "rule.domain-v0.refund.allow-paid-under-limit",
+        "rule.domain-v0.refund.deny-over-limit-or-refunded"
+      ]
+    }
+  }
+}

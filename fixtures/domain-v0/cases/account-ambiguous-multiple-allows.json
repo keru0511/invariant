@@ -1,0 +1,59 @@
+{
+  "id": "fixture.domain-v0.account-ambiguous-multiple-allows",
+  "kind": "golden-evaluation",
+  "contractVersion": "domain-v0",
+  "category": "ambiguous",
+  "functionId": "function.domain-v0.account-review",
+  "description": "A review-state account in a trusted country matches two same-priority allow rules, so the decision remains ambiguous.",
+  "input": {
+    "account": {"state": "review", "riskScore": 10, "country": "JP"}
+  },
+  "expected": {
+    "status": "ambiguous",
+    "value": null,
+    "matchedRuleIds": [
+      "rule.domain-v0.account-review.allow-review-state",
+      "rule.domain-v0.account-review.allow-trusted-country"
+    ],
+    "unresolvedPaths": [],
+    "errors": [
+      {
+        "code": "AMBIGUOUS_MATCH",
+        "message": "Multiple highest-priority rules agree but do not identify a unique decision.",
+        "ruleIds": [
+          "rule.domain-v0.account-review.allow-review-state",
+          "rule.domain-v0.account-review.allow-trusted-country"
+        ]
+      }
+    ],
+    "trace": [
+      {
+        "id": "trace.domain-v0.account-ambiguous-multiple-allows.review-state-rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.allow-review-state",
+        "outcome": "allow"
+      },
+      {
+        "id": "trace.domain-v0.account-ambiguous-multiple-allows.trusted-country-rule",
+        "stage": "rule",
+        "ruleId": "rule.domain-v0.account-review.allow-trusted-country",
+        "outcome": "allow"
+      },
+      {
+        "id": "trace.domain-v0.account-ambiguous-multiple-allows.policy",
+        "stage": "policy",
+        "outcome": "ambiguous"
+      }
+    ],
+    "provenance": {
+      "fixtureId": "fixture.domain-v0.account-ambiguous-multiple-allows",
+      "functionId": "function.domain-v0.account-review",
+      "policyId": "policy.domain-v0.account-review",
+      "inputPaths": ["account.state", "account.riskScore", "account.country"],
+      "ruleIds": [
+        "rule.domain-v0.account-review.allow-review-state",
+        "rule.domain-v0.account-review.allow-trusted-country"
+      ]
+    }
+  }
+}

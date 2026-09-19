@@ -28,3 +28,4 @@ export function ping(): PingResult {
   return { ok: true };
 }
 
+export * from './contract';
