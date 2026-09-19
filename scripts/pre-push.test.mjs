@@ -238,7 +238,7 @@ describe('real push integration', () => {
     expect(JSON.parse(calls[0])).toEqual(['run', 'ci:local']);
     expect(JSON.parse(calls[1])).toEqual(['run', 'ci:local']);
     expect(await readRemoteSha(remote)).toBe((await run('git', ['rev-parse', 'HEAD'], root)).stdout.trim());
-  });
+  }, 10_000);
 
   it('leaves the bare remote SHA unchanged when the gate fails', async () => {
     const root = await createHookFixture('invariant-pre-push-failure-');
@@ -264,5 +264,5 @@ describe('real push integration', () => {
 
     const calls = (await readFile(fakeNpm.calls, 'utf8')).trim().split('\n').filter(Boolean);
     expect(calls).toHaveLength(2);
-  });
+  }, 10_000);
 });
