@@ -100,6 +100,26 @@ describe('pure Domain evaluator', () => {
     expect(first.trace.every((item) => item.id.startsWith('trace.function.domain-v0.account-review.'))).toBe(true);
   });
 
+
+  it('returns a typed ambiguous result for duplicate function names', () => {
+    const duplicate = JSON.parse(JSON.stringify(functionCatalog)) as {
+      functions: Array<{ id: string; name: string }>;
+    };
+    duplicate.functions[1].name = duplicate.functions[0].name;
+
+    const actual = evaluate(duplicate, duplicate.functions[0].name, {});
+    const expectedFunctionIds = [duplicate.functions[0].id, duplicate.functions[1].id]
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+
+    expect(actual).toMatchObject({
+      status: 'ambiguous',
+      value: null,
+      matchedFunctionIds: expectedFunctionIds,
+      errors: [{ code: 'AMBIGUOUS_MATCH', path: 'functionName' }],
+    });
+    expect(actual).not.toHaveProperty('recommendation');
+  });
+
   it('reports invalid function names and argument shapes explicitly', () => {
     const missingFunction = evaluate(functionCatalog, 'does-not-exist', {});
     const wrongType = evaluate(functionCatalog, 'refund', refundInvalidType.input);

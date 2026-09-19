@@ -5,13 +5,24 @@ import {
   localhostAllowedOrigins,
 } from '@modelcontextprotocol/server';
 import type { AuthInfo, McpRequestContext } from '@modelcontextprotocol/server';
-import { ping } from '../domain';
+import { z } from 'zod';
+import { evaluate, ping, type DomainProvenance, type DomainResultStatus } from '../domain';
 import {
   CF_ACCESS_JWT_ASSERTION_HEADER,
   createAccessTokenVerifier,
 } from './access-auth';
 import type { AccessPrincipal, AccessTokenVerifier } from './access-auth';
 import type { Env } from './env';
+import {
+  AuthWorkspaceRepositoryAdapter,
+  DomainRepositoryError,
+  D1WorkspaceMembershipRepository,
+  PUBLIC_RESOURCE_NOT_FOUND,
+  WorkspaceAccessError,
+  type DomainVersionRecord,
+  type ScopedLoadDomainVersionInput,
+} from '../persistence';
+import { createDomainRepository } from '../persistence/domain-repository';
 
 const ALLOWED_ORIGIN_HOSTNAMES = localhostAllowedOrigins();
 
@@ -26,9 +37,22 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 
 export const VERIFIED_PRINCIPAL_AUTH_INFO_KEY = 'invariantAccessPrincipal';
 
+export interface McpWorkspaceDomainRepository {
+  loadVersion(input: ScopedLoadDomainVersionInput): Promise<DomainVersionRecord>;
+}
+
+export interface McpWorkspaceRepository {
+  forPrincipal(
+    principal: AccessPrincipal,
+    workspaceId: string,
+  ): Promise<McpWorkspaceDomainRepository>;
+}
+
 export interface McpRequestDependencies {
   /** Test-only seam; production requests must resolve the configured provider. */
   readonly accessVerifier?: AccessTokenVerifier;
+  /** Test-only seam; production requests resolve this from Env.DB. */
+  readonly workspaceRepository?: McpWorkspaceRepository;
 }
 
 export function getVerifiedAccessPrincipal(
@@ -39,7 +63,177 @@ export function getVerifiedAccessPrincipal(
     | undefined;
 }
 
-function createMcpServer(context: McpRequestContext): McpServer {
+const domainEvaluateInputSchema = z.object({
+  workspace: z.string(),
+  domain: z.string(),
+  version: z.string(),
+  function: z.string(),
+  args: z.unknown(),
+}).strict();
+
+type DomainEvaluateInput = z.infer<typeof domainEvaluateInputSchema>;
+
+type DomainEvaluateStatus = 'resolved' | 'unresolved' | 'ambiguous' | 'conflict' | 'error';
+
+interface DomainEvaluateError {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+  readonly nodeId?: string;
+  readonly ruleIds?: readonly string[];
+}
+
+export interface DomainEvaluateResult {
+  readonly status: DomainEvaluateStatus;
+  readonly decision?: 'allow' | 'deny';
+  readonly value: boolean | null;
+  readonly workspace: string;
+  readonly domain: string;
+  readonly version: string;
+  readonly function: string;
+  readonly matchedFunctionIds: readonly string[];
+  readonly matchedRuleIds: readonly string[];
+  readonly unresolvedPaths: readonly string[];
+  readonly errors: readonly DomainEvaluateError[];
+  readonly trace: readonly unknown[];
+  readonly provenance: DomainProvenance;
+}
+
+function emptyProvenance(): DomainProvenance {
+  return {
+    fixtureId: 'evaluation',
+    functionId: '',
+    policyId: '',
+    inputPaths: [],
+    ruleIds: [],
+  };
+}
+
+function errorResult(
+  input: Partial<DomainEvaluateInput>,
+  code: string,
+  message: string,
+  path?: string,
+): DomainEvaluateResult {
+  return {
+    status: 'error',
+    value: null,
+    workspace: input.workspace ?? '',
+    domain: input.domain ?? '',
+    version: input.version ?? '',
+    function: input.function ?? '',
+    matchedFunctionIds: [],
+    matchedRuleIds: [],
+    unresolvedPaths: [],
+    errors: [{ code, message, ...(path === undefined ? {} : { path }) }],
+    trace: [],
+    provenance: emptyProvenance(),
+  };
+}
+
+function isIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function publicStatus(status: DomainResultStatus): DomainEvaluateStatus {
+  return status === 'allow' || status === 'deny' ? 'resolved' : status;
+}
+
+function evaluationResult(
+  input: DomainEvaluateInput,
+  result: ReturnType<typeof evaluate>,
+): DomainEvaluateResult {
+  const errors = result.errors.map((item) => ({
+    code: item.code,
+    message: item.message,
+    ...(item.path === undefined ? {} : { path: item.path }),
+    ...(item.nodeId === undefined ? {} : { nodeId: item.nodeId }),
+    ...(item.ruleIds === undefined ? {} : { ruleIds: item.ruleIds }),
+  }));
+  const status = publicStatus(result.status);
+  return {
+    status,
+    ...(result.status === 'allow' || result.status === 'deny' ? { decision: result.status } : {}),
+    value: result.value,
+    workspace: input.workspace,
+    domain: input.domain,
+    version: input.version,
+    function: input.function,
+    matchedFunctionIds: result.matchedFunctionIds,
+    matchedRuleIds: result.matchedRuleIds,
+    unresolvedPaths: result.unresolvedPaths,
+    errors,
+    trace: result.trace,
+    provenance: result.provenance,
+  };
+}
+
+function productionWorkspaceRepository(env: Env): McpWorkspaceRepository {
+  if (env.DB === undefined) {
+    throw new Error('D1 database is not configured');
+  }
+  return new AuthWorkspaceRepositoryAdapter(
+    new D1WorkspaceMembershipRepository(env.DB),
+    createDomainRepository(env.DB),
+  );
+}
+
+async function evaluateStoredDomain(
+  input: DomainEvaluateInput,
+  principal: AccessPrincipal,
+  env: Env,
+  dependencies: McpRequestDependencies,
+): Promise<DomainEvaluateResult> {
+  if (!isIdentifier(input.workspace)) {
+    return errorResult(input, 'INVALID_ARGS', 'workspace must be a non-empty, trimmed string.', 'workspace');
+  }
+  if (!isIdentifier(input.domain)) {
+    return errorResult(input, 'INVALID_ARGS', 'domain must be a non-empty, trimmed string.', 'domain');
+  }
+  if (!isIdentifier(input.version)) {
+    return errorResult(input, 'INVALID_VERSION', 'version must be a non-empty, trimmed string.', 'version');
+  }
+  if (!isIdentifier(input.function)) {
+    return errorResult(input, 'INVALID_FUNCTION', 'function must be a non-empty, trimmed string.', 'function');
+  }
+
+  try {
+    const repository = dependencies.workspaceRepository ?? productionWorkspaceRepository(env);
+    const workspace = await repository.forPrincipal(principal, input.workspace);
+    const record = await workspace.loadVersion({
+      domainId: input.domain,
+      versionId: input.version,
+    });
+    if (
+      record.workspaceId !== input.workspace
+      || record.domainId !== input.domain
+      || record.versionId !== input.version
+    ) {
+      return errorResult(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
+    }
+    return evaluationResult(input, evaluate(record.model, input.function, input.args));
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) {
+      return errorResult(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
+    }
+    if (error instanceof DomainRepositoryError) {
+      if (error.code === 'INVALID_IDENTIFIER') {
+        return errorResult(input, 'INVALID_VERSION', 'version is invalid.', 'version');
+      }
+      if (error.code === 'CORRUPT_VERSION') {
+        return errorResult(input, 'STORAGE_FAILURE', 'Stored domain version is invalid.');
+      }
+      return errorResult(input, 'STORAGE_FAILURE', 'Stored domain version could not be loaded.');
+    }
+    return errorResult(input, 'STORAGE_FAILURE', 'Stored domain version could not be loaded.');
+  }
+}
+
+function createMcpServer(
+  context: McpRequestContext,
+  env: Env,
+  dependencies: McpRequestDependencies,
+): McpServer {
   const principal = getVerifiedAccessPrincipal(context);
   if (principal === undefined) {
     // This should be unreachable because authentication happens before the
@@ -73,13 +267,28 @@ function createMcpServer(context: McpRequestContext): McpServer {
     }
   );
 
+  server.registerTool(
+    'domain.evaluate',
+    {
+      description: 'Evaluate an explicitly selected authorized stored domain version.',
+      inputSchema: domainEvaluateInputSchema,
+    },
+    async (input: DomainEvaluateInput) => {
+      const result = await evaluateStoredDomain(input, principal, env, dependencies);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result),
+          },
+        ],
+        isError: result.status === 'error',
+      };
+    },
+  );
+
   return server;
 }
-
-const mcpHandler = createMcpHandler(
-  (context) => createMcpServer(context),
-  { legacy: 'reject' }
-);
 
 function authenticationFailureResponse(corsHeaders: Record<string, string>): Response {
   return new Response(
@@ -147,6 +356,9 @@ export async function handleMcpRequest(
     if (dependencies.accessVerifier !== undefined && env.INVARIANT_ENVIRONMENT !== 'test') {
       throw new Error('injected verifier is test-only');
     }
+    if (dependencies.workspaceRepository !== undefined && env.INVARIANT_ENVIRONMENT !== 'test') {
+      throw new Error('injected workspace repository is test-only');
+    }
     const verifier = dependencies.accessVerifier ?? createAccessTokenVerifier(env);
     principal = await verifier.verify(request);
   } catch {
@@ -155,6 +367,10 @@ export async function handleMcpRequest(
     return authenticationFailureResponse(corsHeaders);
   }
 
+  const mcpHandler = createMcpHandler(
+    (context) => createMcpServer(context, env, dependencies),
+    { legacy: 'reject' },
+  );
   const response = await mcpHandler.fetch(request, {
     authInfo: createMcpAuthInfo(request, principal),
   });
