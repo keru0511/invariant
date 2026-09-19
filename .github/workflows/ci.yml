@@ -33,13 +33,13 @@ jobs:
           cache: npm
       - id: npm
         name: npm
-        run: npm install --global npm@11.9.0 --no-audit --no-fund && test "$(npm --version)" = "11.9.0"
+        run: npm install --prefix .ci-toolchain --no-save --no-package-lock --ignore-scripts npm@11.9.0 && test "$(node .ci-toolchain/node_modules/npm/bin/npm-cli.js --version)" = "11.9.0"
       - id: install
         name: install
-        run: npm ci
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci
       - id: typecheck
         name: typecheck
-        run: npm run typecheck
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js run typecheck
       - id: tests
         name: tests
-        run: npm test
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js test
