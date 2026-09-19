@@ -34,7 +34,31 @@ export const DECISION_REFERENCE_KINDS = [
 ] as const;
 
 export type DecisionReferenceKind = (typeof DECISION_REFERENCE_KINDS)[number];
-export type EvaluationStatus = 'resolved' | 'unresolved';
+/**
+ * States are deliberately kept distinct so a record cannot collapse an
+ * ambiguous or conflicting evaluation into a generic unresolved result.
+ *
+ * `error` is also first-class in v0: evaluator failures are stored in the
+ * JSON `result` payload with this status and a null recommendation.  A
+ * malformed record still fails with `DecisionValidationError` and is never
+ * constructed.
+ */
+export const EVALUATION_STATUSES = [
+  'resolved',
+  'unresolved',
+  'ambiguous',
+  'conflict',
+  'error',
+] as const;
+
+export type EvaluationStatus = (typeof EVALUATION_STATUSES)[number];
+
+const NON_RESOLVED_EVALUATION_STATUSES = new Set<EvaluationStatus>([
+  'unresolved',
+  'ambiguous',
+  'conflict',
+  'error',
+]);
 
 export interface DecisionReference {
   readonly kind: DecisionReferenceKind;
@@ -84,14 +108,14 @@ function readArray(value: Record<string, unknown>, key: string, path: string): r
 }
 
 function readStatus(value: unknown, path: string): EvaluationStatus {
-  if (value !== 'resolved' && value !== 'unresolved') {
+  if (!EVALUATION_STATUSES.includes(value as EvaluationStatus)) {
     throw new DecisionValidationError(
       DECISION_VALIDATION_ERROR_CODES.INVALID_VALUE,
-      `Evaluation status at ${path} must be "resolved" or "unresolved".`,
+      `Evaluation status at ${path} must be one of ${EVALUATION_STATUSES.join(', ')}.`,
       path,
     );
   }
-  return value;
+  return value as EvaluationStatus;
 }
 
 function readReferenceKind(value: unknown, path: string): DecisionReferenceKind {
@@ -279,10 +303,10 @@ function normalizeDecisionRecord(value: unknown, path: string): DecisionRecordJS
       `${path}.recommendationId`,
     );
   }
-  if (status === 'unresolved' && recommendationId !== null) {
+  if (NON_RESOLVED_EVALUATION_STATUSES.has(status) && recommendationId !== null) {
     throw new DecisionValidationError(
       DECISION_VALIDATION_ERROR_CODES.INCONSISTENT_RECORD,
-      'An unresolved evaluation must have a null recommendationId.',
+      `A ${status} evaluation must have a null recommendationId.`,
       `${path}.recommendationId`,
     );
   }
