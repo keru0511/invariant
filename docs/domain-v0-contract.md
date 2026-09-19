@@ -119,3 +119,35 @@ decision remain `ambiguous` with an `AMBIGUOUS_MATCH` diagnostic; they are not
 silently collapsed into `allow` or `deny`. Same-decision ambiguous rule IDs
 are normalized by stable identifier order, while conflict candidates retain
 policy order.
+
+## Domain Patch v0
+
+`src/domain/patch.ts` defines a dependency-free, copy-on-write patch boundary
+for a domain model. A patch has `contractVersion: "domain-patch-v0"`, kind
+`"domain-patch"`, a non-empty `baseVersion`, non-empty `provenance.source`, and
+an ordered list of operations. The patch is applied only when `baseVersion`
+matches the model version; when the model already has provenance, the complete
+patch provenance must match it.
+
+The supported operations are exactly:
+
+- `add_type`
+- `add_function`
+- `add_rule`
+- `add_example`
+- `mark_unknown`
+- `resolve_unknown`
+- `add_conflict`
+
+Operations reject unsupported fields, malformed values, duplicate identifiers,
+and missing references. `add_rule` requires an existing function,
+`resolve_unknown` requires an existing unknown, and duplicate rule identifiers
+are rejected across the catalog. `add_example` is checked against the final
+catalog with the semantic validation path above.
+
+Application is atomic: the input model is copied before any operation is
+applied, and a failed patch never mutates caller-owned data or returns a
+partial candidate. Successful results preserve operation order and are deeply
+frozen. Reapplying the same patch to the same base produces the same serialized
+result. Final validation retains the Domain v0 distinction between
+`unresolved`, `conflict`, `ambiguous`, and `error`.
