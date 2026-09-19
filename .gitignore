@@ -2,6 +2,7 @@
 node_modules/
 
 # Local CI gate artifacts
+.ci-toolchain/
 .actrun-runs/
 _build/
 
