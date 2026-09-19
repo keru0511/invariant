@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleMcpRequest } from './mcp';
 import type { AccessPrincipal } from './access-auth';
-import type { DomainVersionRecord } from '../persistence/domain-repository';
+import type { DomainSearchMatch, DomainVersionRecord } from '../persistence/domain-repository';
 import { WorkspaceAccessError } from '../persistence/workspace-access';
 import { parseDomain } from '../domain';
 import functionCatalog from '../../fixtures/domain-v0/functions.json';
@@ -34,9 +34,15 @@ function createFakeWorkspaceRepository(options: {
   readonly authorizedWorkspace?: string;
   readonly model?: DomainVersionRecord['model'];
   readonly load?: (input: { readonly domainId: string; readonly versionId: string }) => Promise<DomainVersionRecord>;
+  readonly search?: (input: { readonly query: string; readonly limit: number }) => Promise<readonly DomainSearchMatch[]>;
 } = {}) {
   const authorizedWorkspace = options.authorizedWorkspace ?? 'workspace-a';
-  const calls: Array<{ readonly operation: string; readonly workspaceId?: string }> = [];
+  const calls: Array<{
+    readonly operation: string;
+    readonly workspaceId?: string;
+    readonly query?: string;
+    readonly limit?: number;
+  }> = [];
   return {
     calls,
     async forPrincipal(principal: AccessPrincipal, workspaceId: string) {
@@ -55,6 +61,10 @@ function createFakeWorkspaceRepository(options: {
             model: options.model ?? parsedCatalog,
             publishedAt: '2026-09-18T00:00:00.000Z',
           };
+        },
+        async search(input: { readonly query: string; readonly limit: number }) {
+          calls.push({ operation: 'search', workspaceId, query: input.query, limit: input.limit });
+          return options.search ? options.search(input) : [];
         },
       };
     },
@@ -175,6 +185,9 @@ describe('MCP ハンドラー (/mcp)', () => {
           expect.objectContaining({
             name: 'domain.ping',
             description: 'ドメインコアの疎通および健全性を確認',
+          }),
+          expect.objectContaining({
+            name: 'domain.search',
           }),
         ]),
       },
@@ -812,5 +825,169 @@ describe('MCP ハンドラー (/mcp)', () => {
 
     expect(result).toMatchObject({ status: 'error', errors: [{ code: 'STORAGE_FAILURE' }] });
     expect(JSON.stringify(result)).not.toContain('secret SQL details');
+  });
+
+  it('AC: domain.search trims the query, authorizes first, returns metadata, and keeps explicit version IDs', async () => {
+    const match: DomainSearchMatch = {
+      domainId: 'orders',
+      domainName: 'Customer Orders',
+      versionId: 'v7',
+      functionId: 'function.orders.member-age',
+      functionName: 'member-age',
+      description: 'Decide whether a member is an adult.',
+    };
+    const repository = createFakeWorkspaceRepository({
+      search: async ({ query, limit }) => {
+        expect(query).toBe('member');
+        expect(limit).toBe(5);
+        return [match];
+      },
+    });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.search',
+      params: {
+        name: 'domain.search',
+        arguments: { workspace: 'workspace-a', query: '  member  ', limit: 5 },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(response.status).toBe(200);
+    expect(result).toEqual({
+      status: 'ok',
+      ok: true,
+      workspace: 'workspace-a',
+      query: 'member',
+      limit: 5,
+      results: [match],
+      errors: [],
+    });
+    expect(repository.calls).toEqual([
+      { operation: 'authorize', workspaceId: 'workspace-a' },
+      { operation: 'search', workspaceId: 'workspace-a', query: 'member', limit: 5 },
+    ]);
+  });
+
+  it.each([
+    ['blank query', { workspace: 'workspace-a', query: '   ', limit: 5 }, 'INVALID_QUERY', 'query'],
+    ['zero limit', { workspace: 'workspace-a', query: 'member', limit: 0 }, 'INVALID_LIMIT', 'limit'],
+    ['over-limit', { workspace: 'workspace-a', query: 'member', limit: 101 }, 'INVALID_LIMIT', 'limit'],
+    ['fractional limit', { workspace: 'workspace-a', query: 'member', limit: 1.5 }, 'INVALID_LIMIT', 'limit'],
+  ] as const)('AC: domain.search rejects %s explicitly', async (_label, argumentsValue, code, path) => {
+    const repository = createFakeWorkspaceRepository();
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.search',
+      params: { name: 'domain.search', arguments: argumentsValue },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({
+      status: 'error',
+      ok: false,
+      results: [],
+      errors: [{ code, path }],
+    });
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('AC: domain.search returns an empty list for no matches', async () => {
+    const repository = createFakeWorkspaceRepository({ search: async () => [] });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.search',
+      params: {
+        name: 'domain.search',
+        arguments: { workspace: 'workspace-a', query: 'does-not-match', limit: 10 },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({ status: 'ok', ok: true, results: [], errors: [] });
+  });
+
+  it('AC: repeated domain.search calls are deterministic and limit results after authorization', async () => {
+    const matches: readonly DomainSearchMatch[] = [
+      {
+        domainId: 'orders',
+        domainName: 'Orders',
+        versionId: 'v1',
+        functionId: 'function.orders.refund',
+        functionName: 'refund',
+        description: 'Refund an order.',
+      },
+      {
+        domainId: 'orders',
+        domainName: 'Orders',
+        versionId: 'v2',
+        functionId: 'function.orders.refund',
+        functionName: 'refund',
+        description: 'Refund an order, revised.',
+      },
+      {
+        domainId: 'orders',
+        domainName: 'Orders',
+        versionId: 'v3',
+        functionId: 'function.orders.refund',
+        functionName: 'refund',
+        description: 'Refund an order, latest.',
+      },
+    ];
+    const repository = createFakeWorkspaceRepository({
+      search: async ({ limit }) => matches.slice(0, limit),
+    });
+    const request = () => handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.search',
+      params: {
+        name: 'domain.search',
+        arguments: { workspace: 'workspace-a', query: 'refund', limit: 2 },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+
+    const firstResult = await readToolResult(await request());
+    const secondResult = await readToolResult(await request());
+
+    expect(secondResult).toEqual(firstResult);
+    expect(firstResult.results).toHaveLength(2);
+    expect(repository.calls.filter((call) => call.operation === 'search')).toHaveLength(2);
+  });
+
+  it('AC: foreign workspace candidates are hidden before search storage access', async () => {
+    const repository = createFakeWorkspaceRepository({ authorizedWorkspace: 'workspace-a' });
+    const response = await handleMcpRequest(createModernRequest({
+      method: 'tools/call',
+      name: 'domain.search',
+      params: {
+        name: 'domain.search',
+        arguments: { workspace: 'workspace-b', query: 'member', limit: 10 },
+      },
+    }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL },
+      workspaceRepository: repository,
+    });
+    const result = await readToolResult(response);
+
+    expect(result).toMatchObject({
+      status: 'error',
+      ok: false,
+      results: [],
+      errors: [{ code: 'RESOURCE_NOT_FOUND', message: 'Resource not found.' }],
+    });
+    expect(repository.calls).toEqual([{ operation: 'authorize', workspaceId: 'workspace-b' }]);
   });
 });

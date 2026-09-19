@@ -58,10 +58,17 @@ class FakeD1PreparedStatement {
   }
 
   async first<T = Record<string, unknown>>(): Promise<T | null> {
+    this.database.record('first', this.sql, this.values);
     return this.database.first<T>(this.sql, this.values);
   }
 
+  async all<T = Record<string, unknown>>() {
+    this.database.record('all', this.sql, this.values);
+    return this.database.all<T>(this.sql, this.values);
+  }
+
   async run(): Promise<ReturnType<typeof result>> {
+    this.database.record('run', this.sql, this.values);
     return this.database.run(this.sql, this.values);
   }
 }
@@ -72,6 +79,11 @@ class FakeD1PreparedStatement {
  * against a cloned state, so a failed batch cannot leave partial rows.
  */
 export class FakeD1Database {
+  readonly calls: Array<{
+    readonly operation: 'first' | 'all' | 'run';
+    readonly sql: string;
+    readonly values: readonly unknown[];
+  }> = [];
   private workspaces = new Map<string, WorkspaceRow>();
   private memberships = new Map<string, WorkspaceMembershipRow>();
   private domains = new Map<string, DomainRow>();
@@ -80,6 +92,14 @@ export class FakeD1Database {
 
   prepare(sql: string): FakeD1PreparedStatement {
     return new FakeD1PreparedStatement(this, sql);
+  }
+
+  record(
+    operation: 'first' | 'all' | 'run',
+    sql: string,
+    values: readonly unknown[],
+  ): void {
+    this.calls.push({ operation, sql, values: [...values] });
   }
 
   async batch(statements: readonly FakeD1PreparedStatement[]): Promise<readonly ReturnType<typeof result>[]> {
@@ -137,6 +157,35 @@ export class FakeD1Database {
     if (normalized.includes('from domain_versions')) {
       const row = this.versions.get(key(String(values[0]), String(values[1]), String(values[2])));
       return (row ?? null) as T | null;
+    }
+    throw new Error(`FakeD1Database does not support query: ${normalized}`);
+  }
+
+  async all<T>(sql: string, values: readonly unknown[]): Promise<{
+    readonly success: true;
+    readonly results: T[];
+    readonly meta: Record<string, unknown>;
+  }> {
+    const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized.includes('from domains as d') && normalized.includes('inner join domain_versions as v')) {
+      const workspaceId = String(values[0]);
+      const rows = [...this.versions.values()]
+        .filter((version) => version.workspace_id === workspaceId)
+        .map((version) => {
+          const domain = this.domains.get(key(version.workspace_id, version.domain_id));
+          if (domain === undefined) {
+            throw new Error('FakeD1Database domain row is missing for version');
+          }
+          return {
+            workspace_id: version.workspace_id,
+            domain_id: version.domain_id,
+            domain_name: domain.name,
+            version_id: version.version_id,
+            model_json: version.model_json,
+            published_at: version.published_at,
+          };
+        });
+      return result(rows as T[]);
     }
     throw new Error(`FakeD1Database does not support query: ${normalized}`);
   }

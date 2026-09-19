@@ -11,6 +11,7 @@ import {
 import {
   createDomainRepository,
   type D1DatabaseLike,
+  type DomainSearchCandidate,
   type DomainVersionRecord,
 } from './domain-repository';
 import { FakeD1Database } from './fake-d1';
@@ -87,6 +88,10 @@ describe('authenticated workspace domain access', () => {
       async loadVersion(input) {
         calls.push(`load:${input.workspaceId}`);
         return null;
+      },
+      async search(input): Promise<readonly DomainSearchCandidate[]> {
+        calls.push(`search:${input.workspaceId}`);
+        return [];
       },
     };
     const adapter = new AuthWorkspaceRepositoryAdapter(
@@ -167,6 +172,10 @@ describe('authenticated workspace domain access', () => {
           publishedAt: '2026-09-18T00:00:00.000Z',
         };
       },
+      async search(input) {
+        calls.push({ operation: 'search', workspaceId: input.workspaceId });
+        return [];
+      },
     };
     const adapter = new AuthWorkspaceRepositoryAdapter(
       new D1WorkspaceMembershipRepository(db as unknown as D1DatabaseLike),
@@ -177,12 +186,78 @@ describe('authenticated workspace domain access', () => {
     await workspace.createDomain({ domainId: 'orders', name: 'Orders' });
     await workspace.publishVersion({ domainId: 'orders', versionId: 'v1', model: functionCatalog });
     await workspace.loadVersion({ domainId: 'orders', versionId: 'v1' });
+    await workspace.search({ query: 'orders', limit: 10 });
 
     expect(calls).toEqual([
       { operation: 'createDomain', workspaceId: 'workspace-a' },
       { operation: 'publishVersion', workspaceId: 'workspace-a' },
       { operation: 'loadVersion', workspaceId: 'workspace-a' },
+      { operation: 'search', workspaceId: 'workspace-a' },
     ]);
     expect(calls.every((call) => call.workspaceId === 'workspace-a')).toBe(true);
+  });
+
+  it('AC: scoped search filters candidates to the authorized workspace', async () => {
+    const db = new FakeD1Database();
+    db.seedWorkspaceMembership('workspace-a', PRINCIPAL_A.subject);
+    const domainRepository: DomainRepositoryPort = {
+      async createDomain() {},
+      async publishVersion(input): Promise<DomainVersionRecord> {
+        return {
+          workspaceId: input.workspaceId,
+          domainId: input.domainId,
+          versionId: input.versionId,
+          model: validModel(),
+          publishedAt: '2026-09-18T00:00:00.000Z',
+        };
+      },
+      async loadVersion(input) {
+        return {
+          workspaceId: input.workspaceId,
+          domainId: input.domainId,
+          versionId: input.versionId,
+          model: validModel(),
+          publishedAt: '2026-09-18T00:00:00.000Z',
+        };
+      },
+      async search() {
+        return [
+          {
+            workspaceId: 'workspace-a',
+            domainId: 'orders',
+            domainName: 'Orders',
+            versionId: 'v1',
+            functionId: 'function.orders.refund',
+            functionName: 'refund',
+            description: 'local',
+          },
+          {
+            workspaceId: 'workspace-b',
+            domainId: 'orders',
+            domainName: 'Orders',
+            versionId: 'v1',
+            functionId: 'function.orders.refund',
+            functionName: 'refund',
+            description: 'foreign',
+          },
+        ];
+      },
+    };
+    const adapter = new AuthWorkspaceRepositoryAdapter(
+      new D1WorkspaceMembershipRepository(db as unknown as D1DatabaseLike),
+      domainRepository,
+    );
+    const workspace = await adapter.forPrincipal(PRINCIPAL_A, 'workspace-a');
+
+    await expect(workspace.search({ query: 'refund', limit: 10 })).resolves.toEqual([
+      {
+        domainId: 'orders',
+        domainName: 'Orders',
+        versionId: 'v1',
+        functionId: 'function.orders.refund',
+        functionName: 'refund',
+        description: 'local',
+      },
+    ]);
   });
 });

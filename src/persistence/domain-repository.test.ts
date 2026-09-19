@@ -119,4 +119,83 @@ describe('D1 domain persistence', () => {
     expect(db.count('domains')).toBe(0);
     expect(db.count('domain_versions')).toBe(0);
   });
+
+  it('AC: searches domain/function metadata literally, deterministically, and read-only', async () => {
+    const db = new FakeD1Database();
+    const repo = repository(db);
+    const versionTwo = clone(functionCatalog);
+    versionTwo.functions[0].description = 'Literal %_ marker';
+
+    await repo.createDomain({ workspaceId: 'workspace-a', domainId: 'orders', name: 'Customer Orders' });
+    await repo.publishVersion({ workspaceId: 'workspace-a', domainId: 'orders', versionId: 'v1', model: functionCatalog });
+    await repo.publishVersion({ workspaceId: 'workspace-a', domainId: 'orders', versionId: 'v2', model: versionTwo });
+
+    const countsBefore = [db.count('workspaces'), db.count('domains'), db.count('domain_versions')];
+    const callsBefore = db.calls.length;
+    const first = await repo.search({ workspaceId: 'workspace-a', query: '  MEMBER  ', limit: 10 });
+    const second = await repo.search({ workspaceId: 'workspace-a', query: 'MEMBER', limit: 10 });
+
+    expect(first).toEqual(second);
+    expect(first).toEqual([
+      expect.objectContaining({
+        workspaceId: 'workspace-a',
+        domainId: 'orders',
+        domainName: 'Customer Orders',
+        versionId: 'v1',
+        functionId: 'function.domain-v0.member-age',
+        functionName: 'member-age',
+      }),
+      expect.objectContaining({
+        workspaceId: 'workspace-a',
+        versionId: 'v2',
+        functionId: 'function.domain-v0.member-age',
+        functionName: 'member-age',
+        description: 'Literal %_ marker',
+      }),
+    ]);
+
+    const literal = await repo.search({ workspaceId: 'workspace-a', query: '%_', limit: 10 });
+    expect(literal).toHaveLength(1);
+    expect(literal[0]).toMatchObject({ versionId: 'v2', functionName: 'member-age' });
+    expect([db.count('workspaces'), db.count('domains'), db.count('domain_versions')]).toEqual(countsBefore);
+    expect(db.calls.slice(callsBefore).every((call) => call.operation === 'all')).toBe(true);
+    expect(db.calls.slice(callsBefore).every((call) => call.values.length === 1)).toBe(true);
+    expect(db.calls.slice(callsBefore).every((call) => call.values[0] === 'workspace-a')).toBe(true);
+  });
+
+  it('AC: scopes before limit and never returns a foreign workspace candidate', async () => {
+    const db = new FakeD1Database();
+    const repo = repository(db);
+    const localModel = clone(functionCatalog);
+    const foreignModel = clone(functionCatalog);
+    localModel.functions[0].description = 'scope token';
+    foreignModel.functions[0].description = 'scope token';
+
+    await repo.createDomain({ workspaceId: 'workspace-a', domainId: 'zeta', name: 'Zeta local' });
+    await repo.createDomain({ workspaceId: 'workspace-b', domainId: 'alpha', name: 'Alpha foreign' });
+    await repo.publishVersion({ workspaceId: 'workspace-a', domainId: 'zeta', versionId: 'v1', model: localModel });
+    await repo.publishVersion({ workspaceId: 'workspace-b', domainId: 'alpha', versionId: 'v1', model: foreignModel });
+
+    const results = await repo.search({ workspaceId: 'workspace-a', query: 'scope token', limit: 1 });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      workspaceId: 'workspace-a',
+      domainId: 'zeta',
+      versionId: 'v1',
+    });
+    expect(results.some((result) => result.workspaceId === 'workspace-b')).toBe(false);
+  });
+
+  it('AC: rejects invalid query and limit values explicitly at storage boundary', async () => {
+    const db = new FakeD1Database();
+    const repo = repository(db);
+
+    await expect(repo.search({ workspaceId: 'workspace-a', query: '  ', limit: 1 }))
+      .rejects.toMatchObject({ code: 'INVALID_QUERY' });
+    await expect(repo.search({ workspaceId: 'workspace-a', query: 'orders', limit: 0 }))
+      .rejects.toMatchObject({ code: 'INVALID_LIMIT' });
+    await expect(repo.search({ workspaceId: 'workspace-a', query: 'orders', limit: 101 }))
+      .rejects.toMatchObject({ code: 'INVALID_LIMIT' });
+  });
 });
