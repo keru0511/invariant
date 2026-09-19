@@ -32,3 +32,4 @@ export * from './contract';
 export * from './runtime';
 export * from './evaluator';
 export * from './patch';
+export * from './conversation-patch';
