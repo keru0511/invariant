@@ -15,10 +15,11 @@ export const EXPECTED_ACTRUN_VERSION = '0.32.0';
 export const WORKFLOW_PATH = '.github/workflows/ci.yml';
 export const WORKFLOW_NAME = 'CI';
 export const JOB_ID = 'quality';
-export const MANDATORY_STEP_IDS = ['install', 'typecheck', 'tests'];
+export const MANDATORY_STEP_IDS = ['npm', 'install', 'typecheck', 'tests'];
 export const LOCAL_TRIGGER = 'push';
 export const ALLOWED_IGNORED_PREFIXES = [
   'node_modules/',
+  '.ci-toolchain/',
   '.actrun-runs/',
   '_build/',
 ];
@@ -234,9 +235,10 @@ export function validateWorkflowDefinition(source) {
         workflowContractError(`unapproved uses entry in step ${step.id}`);
       }
       const requiredCommand = {
-        install: 'npm ci',
-        typecheck: 'npm run typecheck',
-        tests: 'npm test',
+        npm: 'npm install --prefix .ci-toolchain --no-save --no-package-lock --ignore-scripts npm@11.9.0 && test "$(node .ci-toolchain/node_modules/npm/bin/npm-cli.js --version)" = "11.9.0"',
+        install: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci',
+        typecheck: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js run typecheck',
+        tests: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js test',
       }[step.id];
       if (runLines.length !== 1 || runLines[0] !== `        run: ${requiredCommand}`) {
         workflowContractError(`step ${step.id} must run ${requiredCommand}`);
@@ -450,6 +452,7 @@ async function readJson(path) {
 export async function assertExactToolchain(repoRoot, {
   expectedNodeVersion = EXPECTED_NODE_VERSION,
   expectedNpmVersion = EXPECTED_NPM_VERSION,
+  requireExactNpm = true,
   expectedActrunVersion = EXPECTED_ACTRUN_VERSION,
   runnerPathOverride,
   npmVersionOverride,
@@ -473,8 +476,16 @@ export async function assertExactToolchain(repoRoot, {
       throw new GateError('missing-npm', 'npm is required but could not be executed', error);
     }
   }
-  if (npmVersion !== expectedNpmVersion) {
-    throw new GateError('wrong-npm-version', `npm ${expectedNpmVersion} is required; running ${npmVersion}`);
+  const npmMatch = /^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(npmVersion);
+  const npmMajor = npmMatch ? Number(npmMatch[1]) : Number.NaN;
+  const expectedNpmMajor = Number(expectedNpmVersion.split('.')[0]);
+  if (
+    !npmMatch
+    || npmMajor !== expectedNpmMajor
+    || (requireExactNpm && npmVersion !== expectedNpmVersion)
+  ) {
+    const expected = requireExactNpm ? expectedNpmVersion : `${expectedNpmMajor}.x`;
+    throw new GateError('wrong-npm-version', `npm ${expected} is required; running ${npmVersion}`);
   }
 
   const packageJson = await readJson(join(repoRoot, 'package.json'));
@@ -563,14 +574,26 @@ export function runActrunProcess(command, args, { cwd, timeoutMs, onChild } = {}
   });
 }
 
-function terminateChild(child, signal = 'SIGTERM') {
-  if (!child?.pid) return;
+export function terminateChild(child, signal = 'SIGTERM') {
+  if (!child?.pid) return false;
+  let sent = false;
   try {
-    if (process.platform === 'win32') child.kill(signal);
-    else process.kill(-child.pid, signal);
+    if (process.platform === 'win32') {
+      sent = child.kill(signal) || sent;
+    } else {
+      process.kill(-child.pid, signal);
+      sent = true;
+    }
   } catch {
-    try { child.kill(signal); } catch { /* already exited */ }
+    // The process group may already have gone away. Still signal the direct
+    // child because a runner can change its own process group.
   }
+  try {
+    sent = child.kill(signal) || sent;
+  } catch {
+    // The child already exited.
+  }
+  return sent;
 }
 
 export async function runGate({
@@ -587,7 +610,7 @@ export async function runGate({
   validateWorkflowDefinition(workflowSource);
   const initialStatus = await assertCallerClean(repoRoot);
   const capturedHeadSha = await runGit(['rev-parse', 'HEAD'], repoRoot);
-  const toolchain = await assertExactToolchain(repoRoot);
+  const toolchain = await assertExactToolchain(repoRoot, { requireExactNpm: false });
   const runRoot = join(repoRoot, '.actrun-runs', `ci-local-${capturedHeadSha}-${now()}-${random()}`);
   await mkdir(runRoot, { recursive: true });
   const snapshotInfo = await createSnapshot(repoRoot, capturedHeadSha);
@@ -601,9 +624,13 @@ export async function runGate({
   let primaryError;
   let interrupted = false;
   let child;
+  let signalForceKillTimer;
   const handleSignal = () => {
+    if (interrupted) return;
     interrupted = true;
     terminateChild(child);
+    signalForceKillTimer = setTimeout(() => terminateChild(child, 'SIGKILL'), 1_000);
+    signalForceKillTimer.unref?.();
   };
   process.once('SIGINT', handleSignal);
   process.once('SIGTERM', handleSignal);
@@ -638,6 +665,7 @@ export async function runGate({
   } finally {
     process.removeListener('SIGINT', handleSignal);
     process.removeListener('SIGTERM', handleSignal);
+    if (signalForceKillTimer) clearTimeout(signalForceKillTimer);
     await removeSnapshot(repoRoot, snapshotInfo);
   }
 

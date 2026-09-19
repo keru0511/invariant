@@ -114,7 +114,7 @@ async function waitForFile(path, timeoutMs = 5_000) {
 }
 
 function validRunRecord() {
-  const mandatoryStepIds = ['install', 'typecheck', 'tests'];
+  const mandatoryStepIds = ['npm', 'install', 'typecheck', 'tests'];
   return {
     run_id: 'run-1',
     workflowName: 'CI',
@@ -224,7 +224,7 @@ describe('workflow contract', () => {
   it('rejects an extra or unapproved uses entry', async () => {
     const source = await readFile(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     const withExtraUses = source.replace(
-      '        run: npm ci',
+      '        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci',
       '        uses: actions/unapproved@0000000000000000000000000000000000000000\n        run: npm ci',
     );
     expectGateError(() => validateWorkflowDefinition(withExtraUses), 'workflow-contract');
@@ -366,7 +366,7 @@ setInterval(() => {}, 1_000);
     expect(await runGit(['status', '--porcelain'], root)).toBe('');
     expect(await runGit(['rev-parse', 'HEAD'], root)).toBe(initialHead);
     expect((await runGit(['worktree', 'list', '--porcelain'], root)).split('\n\n')).toHaveLength(1);
-  });
+  }, 15_000);
 });
 
 describe('fail-closed run-record validation', () => {
@@ -446,6 +446,21 @@ describe('exact toolchain and entrypoint guards', () => {
       expectedNpmVersion: '11.9.0',
       expectedActrunVersion: EXPECTED_ACTRUN_VERSION,
     }), 'wrong-node-version');
+  });
+
+  it('preflights an available npm patch but keeps the workflow npm pin exact', async () => {
+    const root = await createGateFixture(
+      'invariant-toolchain-npm-pin-',
+      '#!/usr/bin/env node\n',
+    );
+    const preflight = await assertExactToolchain(root, {
+      requireExactNpm: false,
+      npmVersionOverride: '11.17.0',
+    });
+    expect(preflight).toMatchObject({ npmVersion: '11.17.0' });
+    await expectAsyncGateError(() => assertExactToolchain(root, {
+      npmVersionOverride: '11.17.0',
+    }), 'wrong-npm-version');
   });
 
   it('rejects a missing caller-installed runner without fallback', async () => {

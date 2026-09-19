@@ -17,12 +17,14 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     steps:
+      - id: npm
+        run: npm install --prefix .ci-toolchain --no-save --no-package-lock --ignore-scripts npm@11.9.0 && test "$(node .ci-toolchain/node_modules/npm/bin/npm-cli.js --version)" = "11.9.0"
       - id: install
-        run: npm ci
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci
       - id: typecheck
-        run: npm run typecheck
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js run typecheck
       - id: tests
-        run: npm test
+        run: node .ci-toolchain/node_modules/npm/bin/npm-cli.js test
 `;
 
 const TYPESCRIPT = `{
