@@ -14,7 +14,6 @@ import {
 } from './decision-context';
 import {
   DecisionRecord,
-  decisionRecordEquals,
 } from './decision-record';
 
 export const DECISION_COMPARISON_STATUSES = [
@@ -30,7 +29,9 @@ export type DecisionInputChangeKind =
   | 'fact'
   | 'constraint'
   | 'objective_weight'
-  | 'alternative';
+  | 'unknown'
+  | 'alternative'
+  | 'out_of_scope';
 
 export interface DecisionInputChange {
   readonly kind: DecisionInputChangeKind;
@@ -95,11 +96,29 @@ function changedValues<T extends { readonly id: string }>(
   return changes;
 }
 
+function changedTextValues(
+  left: readonly string[],
+  right: readonly string[],
+  kind: DecisionInputChangeKind,
+): readonly DecisionInputChange[] {
+  const leftValues = new Set(left);
+  const rightValues = new Set(right);
+  const values = [...new Set([...left, ...right])].sort();
+
+  return values.flatMap((value) => {
+    const before = leftValues.has(value) ? value : null;
+    const after = rightValues.has(value) ? value : null;
+    return before === after ? [] : [{ kind, id: value, before, after }];
+  });
+}
+
 function compareInputs(left: DecisionContext, right: DecisionContext): readonly DecisionInputChange[] {
   const changes = [
     ...changedValues(left.facts, right.facts, (item) => item.value, 'fact'),
     ...changedValues(left.hardConstraints, right.hardConstraints, (item) => item.description, 'constraint'),
     ...changedValues(left.objectives, right.objectives, (item) => item.weight, 'objective_weight'),
+    ...changedTextValues(left.outOfScope, right.outOfScope, 'out_of_scope'),
+    ...changedValues(left.unknowns, right.unknowns, (item) => item.description, 'unknown'),
     ...changedValues(left.alternatives, right.alternatives, (item) => item.description, 'alternative'),
   ];
 
@@ -107,7 +126,9 @@ function compareInputs(left: DecisionContext, right: DecisionContext): readonly 
     fact: 0,
     constraint: 1,
     objective_weight: 2,
-    alternative: 3,
+    unknown: 3,
+    alternative: 4,
+    out_of_scope: 5,
   };
   return changes.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.id.localeCompare(b.id));
 }
@@ -129,8 +150,7 @@ export function compareDecisionRecords(left: unknown, right: unknown): DecisionC
     return { status: 'inputs_changed', changed_inputs };
   }
 
-  if (before.recommendationId !== after.recommendationId ||
-      !decisionRecordEquals(before, after)) {
+  if (before.recommendationId !== after.recommendationId) {
     return { status: 'inconsistent', changed_inputs: [] };
   }
 
