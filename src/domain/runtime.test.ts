@@ -15,6 +15,8 @@ import {
   parseFunction,
   parseGoldenFixture,
   parseExpression,
+  validateDomainFixtures,
+  validateGoldenFixture,
   type DomainParseResult,
 } from './runtime';
 
@@ -201,7 +203,6 @@ describe('Domain v0 runtime validation', () => {
     expect(statuses.size).toBe(6);
   });
 
-
   it('accepts the ambiguous status and preserves its fixture through round-trip', () => {
     const parsed = parseGoldenFixture(accountAmbiguous);
     expect(parsed.ok).toBe(true);
@@ -231,6 +232,129 @@ describe('Domain v0 runtime validation', () => {
     expect(parsed.value.expected.provenance.fixtureId).toBe(accountConflict.id);
     expect(parsed.value.expected.errors[0].code).toBe('RULE_CONFLICT');
     expect(parsed.value.expected.value).toBeNull();
+  });
+
+  it('validates every #23 fixture against its function semantics', () => {
+    const validated = validateDomainFixtures(functionCatalog, fixtures);
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(validated.value).toHaveLength(8);
+    expect(validated.value.map((fixture) => fixture.id)).toEqual(fixtures.map((fixture) => fixture.id));
+  });
+
+  it('rejects missing references with stable code and path diagnostics', () => {
+    const invalid = clone(functionCatalog) as {
+      functions: Array<{ policy: { rules: Array<{ when: { left: { path: string } } }> } }>;
+    };
+    invalid.functions[0].policy.rules[0].when.left.path = 'user.missing';
+    const result = parseDomain(invalid);
+    expectError(result, 'INVALID_REFERENCE', 'functions[0].policy.rules[0].when.left.path');
+    if (!result.ok) expect(result.errors).toEqual([result.error]);
+  });
+
+  it('rejects duplicate IDs without changing the source object', () => {
+    const source = clone(functionCatalog);
+    const before = JSON.stringify(source);
+    const invalid = clone(source) as {
+      functions: Array<{ inputs: Array<Record<string, unknown>> }>;
+    };
+    invalid.functions[0].inputs.push(clone(invalid.functions[0].inputs[0]));
+    const result = parseDomain(invalid);
+    expectError(result, 'DUPLICATE_ID', 'functions[0].inputs[1].path');
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it('rejects wrong predicate and argument types with stable paths', () => {
+    const predicate = {
+      id: 'node.test.predicate',
+      kind: 'not',
+      operand: { id: 'node.test.number', kind: 'literal', value: 1 },
+    };
+    expectError(parseExpression(predicate), 'TYPE_MISMATCH', 'operand');
+
+    const invalidInput = clone(refundInvalidType);
+    invalidInput.category = 'valid';
+    const result = validateGoldenFixture(invalidInput, functionCatalog.functions[1]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((error) => error.code === 'TYPE_MISMATCH' && error.path === 'input.order.total')).toBe(true);
+      expect(result.errors.some((error) => error.code === 'INVALID_EXPECTATION')).toBe(true);
+    }
+  });
+
+  it('rejects fixture arity and variable-scope violations', () => {
+    const invalid = clone(memberAgeBoundary) as {
+      input: { user: { age: number; extra?: boolean } };
+    };
+    invalid.input.user.extra = true;
+    const result = validateGoldenFixture(invalid, functionCatalog.functions[0]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((error) => error.code)).toEqual(['INVALID_ARITY', 'INVALID_SCOPE']);
+      expect(result.errors.map((error) => error.path)).toEqual(['input', 'input.user.extra']);
+    }
+  });
+
+  it('rejects prohibited cycles and unsupported nodes', () => {
+    const cyclic: Record<string, unknown> = {
+      id: 'node.test.cycle',
+      kind: 'not',
+      operand: undefined,
+    };
+    cyclic.operand = cyclic;
+    expectError(parseExpression(cyclic), 'CIRCULAR_REFERENCE', 'operand');
+
+    expectError(
+      parseExpression({ id: 'node.test.call', kind: 'call', name: 'unsupported', arguments: [] }),
+      'INVALID_DISCRIMINATOR',
+      'kind',
+    );
+  });
+
+  it('returns deterministic diagnostics for multiple semantic errors', () => {
+    const invalid = clone(memberAgeBoundary) as {
+      expected: {
+        status: 'allow' | 'deny';
+        value: boolean | null;
+        matchedRuleIds: string[];
+        provenance: { functionId: string; policyId: string };
+      };
+      input: { user: { age: number; extra?: boolean } };
+    };
+    invalid.expected.status = 'deny';
+    invalid.expected.value = false;
+    invalid.expected.matchedRuleIds = ['rule.unknown'];
+    invalid.expected.provenance.functionId = 'function.unknown';
+    invalid.expected.provenance.policyId = 'policy.unknown';
+    invalid.input.user.extra = true;
+    const first = validateGoldenFixture(invalid, functionCatalog.functions[0]);
+    const second = validateGoldenFixture(invalid, functionCatalog.functions[0]);
+    expect(first.ok).toBe(false);
+    expect(second.ok).toBe(false);
+    if (!first.ok && !second.ok) {
+      expect(first.errors).toEqual(second.errors);
+      expect(first.errors.map((error) => error.path)).toEqual([
+        'expected.matchedRuleIds',
+        'expected.matchedRuleIds',
+        'expected.provenance.functionId',
+        'expected.provenance.policyId',
+        'expected.status',
+        'expected.value',
+        'input',
+        'input.user.extra',
+      ]);
+    }
+  });
+
+  it('does not mutate inputs during semantic validation', () => {
+    const domain = clone(functionCatalog);
+    const input = clone(memberAgeBoundary);
+    const beforeDomain = JSON.stringify(domain);
+    const beforeInput = JSON.stringify(input);
+    const result = validateDomainFixtures(domain, [input]);
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(domain)).toBe(beforeDomain);
+    expect(JSON.stringify(input)).toBe(beforeInput);
   });
 
 });
