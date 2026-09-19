@@ -29,3 +29,4 @@ export function ping(): PingResult {
 }
 
 export * from './contract';
+export * from './runtime';
