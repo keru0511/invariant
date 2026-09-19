@@ -11,7 +11,8 @@
     "smoke:deployment": "node scripts/deployment-smoke.mjs",
     "ci:local": "node scripts/ci-local.mjs",
     "test:ci-gate": "node scripts/ci-gate-smoke.mjs",
-    "hooks:install": "node scripts/hooks-install.mjs"
+    "hooks:install": "node scripts/hooks-install.mjs",
+    "pr:create": "node scripts/pr-create.mjs"
   },
   "devDependencies": {
     "@mizchi/actrun": "0.32.0",
