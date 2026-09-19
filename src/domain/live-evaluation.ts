@@ -35,6 +35,7 @@ export interface LiveEvaluationConfig {
   readonly domain: string;
   readonly domainVersion: string;
   readonly function: string;
+  readonly args: Readonly<Record<string, unknown>>;
   readonly timeoutMs: number;
 }
 
@@ -46,10 +47,11 @@ export const DEFAULT_LIVE_EVALUATION_CONFIG: LiveEvaluationConfig = Object.freez
   model: "gpt-4o-mini",
   baseUrl: "https://api.openai.com/v1",
   mcpUrl: "http://localhost:8787/mcp",
-  workspace: "evaluation",
-  domain: "evaluation-v0",
-  domainVersion: "v0",
-  function: "evaluate",
+  workspace: "workspace-a",
+  domain: "orders",
+  domainVersion: "v1",
+  function: "member-age",
+  args: { user: { age: 21 } },
   timeoutMs: 30_000,
 });
 
@@ -64,6 +66,7 @@ export interface LiveEvaluationCliOptions {
   readonly domain?: string;
   readonly domainVersion?: string;
   readonly function?: string;
+  readonly args?: Readonly<Record<string, unknown>>;
   readonly timeoutMs?: number;
   readonly help: boolean;
 }
@@ -112,6 +115,13 @@ function httpUrl(value: unknown, field: string): string {
   return candidate.replace(/\/+$/, "");
 }
 
+function jsonObject(value: unknown, field: string): Readonly<Record<string, unknown>> {
+  if (!isRecord(value)) {
+    throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be a JSON object.");
+  }
+  return Object.freeze({ ...value });
+}
+
 export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConfig {
   if (!isRecord(value)) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", "Live evaluation config must be an object.");
@@ -134,6 +144,7 @@ export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConf
     domain: text(value.domain, "domain"),
     domainVersion: text(value.domainVersion, "domainVersion"),
     function: text(value.function, "function"),
+    args: jsonObject(value.args, "args"),
     timeoutMs: positiveInteger(value.timeoutMs, "timeoutMs"),
   });
 }
@@ -169,6 +180,19 @@ function argInteger(value: string, flag: string): number {
   return Number(value);
 }
 
+function argJsonObject(value: string, flag: string): Readonly<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new LiveEvaluationConfigError("INVALID_ARGUMENT", flag + " must contain valid JSON.");
+  }
+  if (!isRecord(parsed)) {
+    throw new LiveEvaluationConfigError("INVALID_ARGUMENT", flag + " must contain a JSON object.");
+  }
+  return Object.freeze({ ...parsed });
+}
+
 export function parseLiveEvaluationArgs(args: readonly string[]): LiveEvaluationCliOptions {
   const result: {
     configPath?: string;
@@ -181,6 +205,7 @@ export function parseLiveEvaluationArgs(args: readonly string[]): LiveEvaluation
     domain?: string;
     domainVersion?: string;
     function?: string;
+    args?: Readonly<Record<string, unknown>>;
     timeoutMs?: number;
     help: boolean;
   } = { help: false };
@@ -205,6 +230,7 @@ export function parseLiveEvaluationArgs(args: readonly string[]): LiveEvaluation
       case "--domain": result.domain = read(); break;
       case "--domain-version": result.domainVersion = read(); break;
       case "--function": result.function = read(); break;
+      case "--args-json": result.args = argJsonObject(read(), "--args-json"); break;
       case "--timeout-ms": result.timeoutMs = argInteger(read(), "--timeout-ms"); break;
       default:
         throw new LiveEvaluationConfigError("INVALID_ARGUMENT", "Unknown argument: " + raw + ".");
@@ -227,6 +253,7 @@ export function applyLiveEvaluationCliOptions(
     domain: options.domain ?? config.domain,
     domainVersion: options.domainVersion ?? config.domainVersion,
     function: options.function ?? config.function,
+    args: options.args ?? config.args,
     timeoutMs: options.timeoutMs ?? config.timeoutMs,
   });
 }
@@ -449,7 +476,7 @@ export async function runLiveEvaluation(
                 domain: config.domain,
                 version: config.domainVersion,
                 function: config.function,
-                args: { fixtureId: candidate.id, prompt: candidate.prompt },
+                args: config.args,
               }),
             }
             : undefined);

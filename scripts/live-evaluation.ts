@@ -38,11 +38,14 @@ const USAGE = [
   "  --domain ID         stored domain identifier",
   "  --domain-version ID stored domain version",
   "  --function NAME     stored domain function",
+  "  --args-json JSON    stored domain function arguments",
   "  --timeout-ms N      per-call timeout",
   "  --help              show this help",
   "",
-  "Credentials: LIVE_EVAL_API_KEY or OPENAI_API_KEY plus LIVE_EVAL_MCP_TOKEN or INVARIANT_MCP_TOKEN.",
+  "Credentials: LIVE_EVAL_API_KEY or OPENAI_API_KEY plus a Cloudflare Access JWT in LIVE_EVAL_MCP_TOKEN or INVARIANT_MCP_TOKEN.",
 ].join("\n") + "\n";
+
+export const CF_ACCESS_JWT_ASSERTION_HEADER = "Cf-Access-Jwt-Assertion";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -131,7 +134,7 @@ export class HttpInvariantToolClient implements InvariantToolClient {
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
           "MCP-Protocol-Version": "2025-06-18",
-          Authorization: "Bearer " + this.token,
+          [CF_ACCESS_JWT_ASSERTION_HEADER]: this.token,
         },
         body: JSON.stringify(body),
         signal: controller.signal,

@@ -103,10 +103,20 @@ class RecordedInvariantToolClient implements InvariantToolClient {
 describe("live evaluation configuration and recording", () => {
   it("validates the smoke default and command overrides without I/O", () => {
     expect(DEFAULT_LIVE_EVALUATION_CONFIG.trialsPerCase).toBe(1);
+    expect(DEFAULT_LIVE_EVALUATION_CONFIG).toMatchObject({
+      workspace: "workspace-a",
+      domain: "orders",
+      domainVersion: "v1",
+      function: "member-age",
+      args: { user: { age: 21 } },
+    });
     expect(parseLiveEvaluationArgs(["--trials", "3", "--timeout-ms=5000"])).toMatchObject({
       trialsPerCase: 3,
       timeoutMs: 5000,
       help: false,
+    });
+    expect(parseLiveEvaluationArgs(["--args-json", "{\"user\":{\"age\":18}}"])).toMatchObject({
+      args: { user: { age: 18 } },
     });
     expect(() => parseLiveEvaluationArgs(["--trials", "0"])).toThrow(/positive integer/);
     expect(() => parseLiveEvaluationArgs(["--unknown"])).toThrow(/Unknown argument/);
@@ -145,16 +155,18 @@ describe("live evaluation configuration and recording", () => {
     expect(artifacts.map((item) => item.adapter)).toEqual(["llm-only", "llm-invariant"]);
     expect(toolClient.requests).toHaveLength(1);
     expect(toolClient.requests[0]).toMatchObject({
-      workspace: "evaluation",
-      domain: "evaluation-v0",
-      version: "v0",
-      function: "evaluate",
-      args: { fixtureId: fixture.id, prompt: fixture.prompt },
+      workspace: "workspace-a",
+      domain: "orders",
+      version: "v1",
+      function: "member-age",
+      args: { user: { age: 21 } },
     });
+    expect(JSON.stringify(toolClient.requests[0])).not.toContain(fixture.id);
+    expect(JSON.stringify(toolClient.requests[0])).not.toContain(fixture.prompt);
     expect(artifacts[1].request?.invariantContext).toMatchObject({
       tool: "domain.evaluate",
       request: toolClient.requests[0],
-      response: { status: "resolved", workspace: "evaluation" },
+      response: { status: "resolved", workspace: "workspace-a" },
     });
     expect(artifacts[1].invariantToolRequest).toMatchObject(toolClient.requests[0]);
     expect(artifacts[1].invariantToolResponse).toMatchObject({ status: "resolved" });
@@ -173,11 +185,11 @@ describe("live evaluation configuration and recording", () => {
     const invariantRecord = await llmInvariantAdapter.run(first, { complete: async () => responseFor(first, "allow") }, {
       invariantToolClient: new RecordedInvariantToolClient(),
       invariantToolRequest: () => ({
-        workspace: "evaluation",
-        domain: "evaluation-v0",
-        version: "v0",
-        function: "evaluate",
-        args: {},
+        workspace: "workspace-a",
+        domain: "orders",
+        version: "v1",
+        function: "member-age",
+        args: { user: { age: 21 } },
       }),
     });
     const artifacts = [

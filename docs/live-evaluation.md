@@ -9,6 +9,12 @@ evaluation-v0 fixtures:
   fields. It receives the recorded tool result; fixture `knownFacts` and
   `knownConstraints` are never copied into the model prompt.
 
+The checked-in smoke target is the repository's domain-v0 demo shape:
+`workspace-a / orders / v1 / member-age` with
+`args: { "user": { "age": 21 } }`. Use `--config`,
+`--args-json`, or the target flags when the authorized deployment uses
+another stored workspace/domain/version.
+
 Both paths use the #15 adapters and independent scorer. The provider client is
 an OpenAI-compatible chat-completions client and the Invariant client is a
 JSON-RPC/MCP HTTP client. Normal typecheck and test commands never invoke
@@ -24,10 +30,13 @@ It runs one trial for every fixture in each condition:
 LIVE_EVAL_API_KEY is accepted as an alternative. The model and endpoint can
 be overridden with OPENAI_MODEL, OPENAI_BASE_URL, --model, or --base-url. The
 runner also needs `LIVE_EVAL_MCP_TOKEN` (or `INVARIANT_MCP_TOKEN`) for the
-authenticated MCP endpoint. `LIVE_EVAL_MCP_URL`, `LIVE_EVAL_WORKSPACE`,
+authenticated MCP endpoint. The token is a Cloudflare Access JWT sent as
+`Cf-Access-Jwt-Assertion`, matching the Worker verifier; it is not sent as a
+Bearer `Authorization` header. `LIVE_EVAL_MCP_URL`, `LIVE_EVAL_WORKSPACE`,
 `LIVE_EVAL_DOMAIN`, `LIVE_EVAL_DOMAIN_VERSION`, and `LIVE_EVAL_DOMAIN_FUNCTION`
-override the stored-tool target. Missing provider or MCP credentials fail with
-exit code 2 before either network call.
+override the stored-tool target. Use `--args-json` or a config file to change
+the function arguments. Missing provider or MCP credentials fail with exit code
+2 before either network call.
 
 For a larger run, set the number of attempts explicitly:
 
@@ -55,4 +64,3 @@ the provider, MCP endpoint, filesystem, clock, or network.
 
 No live credentials, deployment, or paid provider call is part of normal CI or
 the issue #29 verification run.
-

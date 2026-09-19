@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LIVE_EVALUATION_CONFIG, resolveLiveEvaluationConfig } from "../src/domain/live-evaluation";
-import { HttpInvariantToolClient, runLiveEvaluationCommand } from "./live-evaluation";
+import {
+  CF_ACCESS_JWT_ASSERTION_HEADER,
+  HttpInvariantToolClient,
+  runLiveEvaluationCommand,
+} from "./live-evaluation";
 
 describe("live evaluation command", () => {
   it("returns a clear non-zero result without credentials and does not call a provider", async () => {
@@ -74,9 +78,10 @@ describe("live evaluation command", () => {
     expect(observedUrl).toBe("https://invariant.example/mcp");
     expect(observedInit?.method).toBe("POST");
     expect(observedInit?.headers).toMatchObject({
-      Authorization: "Bearer mcp-secret",
+      [CF_ACCESS_JWT_ASSERTION_HEADER]: "mcp-secret",
       "MCP-Protocol-Version": "2025-06-18",
     });
+    expect(observedInit?.headers).not.toHaveProperty("Authorization");
     const body = JSON.parse(String(observedInit?.body)) as {
       readonly method: string;
       readonly params: { readonly name: string; readonly arguments: typeof request };
@@ -87,4 +92,3 @@ describe("live evaluation command", () => {
     expect(client.takeLastCall()).toMatchObject({ request, response: { status: "resolved" } });
   });
 });
-
