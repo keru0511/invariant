@@ -16,7 +16,14 @@ import {
   type LiveEvaluationCliOptions,
 } from "../src/domain/live-evaluation";
 import { OFFLINE_EVALUATION_FIXTURES } from "../src/domain/evaluation-fixtures";
-import type { AdapterKind, EvaluationFixture } from "../src/domain/evaluation";
+import type {
+  AdapterKind,
+  EvaluationFixture,
+  InvariantToolCapture,
+  InvariantToolClient,
+  InvariantToolRequest,
+  ModelRequest,
+} from "../src/domain/evaluation";
 
 const USAGE = [
   "Usage: npm run eval:live -- [options]",
@@ -26,10 +33,15 @@ const USAGE = [
   "  --output-dir PATH  artifact directory",
   "  --model NAME        provider model",
   "  --base-url URL      OpenAI-compatible API base URL",
+  "  --mcp-url URL       authenticated MCP endpoint exposing domain.evaluate",
+  "  --workspace ID      workspace authorization field",
+  "  --domain ID         stored domain identifier",
+  "  --domain-version ID stored domain version",
+  "  --function NAME     stored domain function",
   "  --timeout-ms N      per-call timeout",
   "  --help              show this help",
   "",
-  "Credentials: LIVE_EVAL_API_KEY or OPENAI_API_KEY.",
+  "Credentials: LIVE_EVAL_API_KEY or OPENAI_API_KEY plus LIVE_EVAL_MCP_TOKEN or INVARIANT_MCP_TOKEN.",
 ].join("\n") + "\n";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -75,6 +87,81 @@ function providerToolCalls(payload: unknown): readonly unknown[] {
   return first.message.tool_calls;
 }
 
+function mcpToolResult(payload: unknown): unknown {
+  if (!isRecord(payload)) return payload;
+  if ("error" in payload) return payload;
+  const result = payload.result;
+  if (!isRecord(result) || !Array.isArray(result.content) || result.content.length === 0) return payload;
+  const first = result.content[0];
+  if (!isRecord(first) || typeof first.text !== "string") return payload;
+  try {
+    return JSON.parse(first.text);
+  } catch {
+    return first.text;
+  }
+}
+
+/** JSON-RPC/MCP transport for the stored #14 `domain.evaluate` tool. */
+export class HttpInvariantToolClient implements InvariantToolClient {
+  private requestId = 0;
+  private capture: InvariantToolCapture | null = null;
+
+  constructor(
+    private readonly config: LiveEvaluationConfig,
+    private readonly token: string,
+    private readonly fetchImpl: typeof fetch = globalThis.fetch,
+  ) {}
+
+  async evaluate(request: InvariantToolRequest): Promise<unknown> {
+    const body = {
+      jsonrpc: "2.0",
+      id: ++this.requestId,
+      method: "tools/call",
+      params: {
+        name: "domain.evaluate",
+        arguments: request,
+      },
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    try {
+      const response = await this.fetchImpl(this.config.mcpUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2025-06-18",
+          Authorization: "Bearer " + this.token,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const payload: unknown = await response.json();
+      const toolResponse = mcpToolResult(payload);
+      this.capture = { request, response: toolResponse };
+      if (!response.ok) throw new Error("Invariant MCP HTTP " + response.status + ".");
+      if (isRecord(payload) && "error" in payload) throw new Error("Invariant MCP returned a JSON-RPC error.");
+      return toolResponse;
+    } catch (error) {
+      if (this.capture === null) {
+        this.capture = {
+          request,
+          response: { error: error instanceof Error ? error.message : String(error) },
+        };
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  takeLastCall(): InvariantToolCapture | null {
+    const value = this.capture;
+    this.capture = null;
+    return value;
+  }
+}
+
 class OpenAICompatibleModel implements CapturingEvaluationModel {
   private capture: LiveCallCapture | null = null;
 
@@ -84,19 +171,11 @@ class OpenAICompatibleModel implements CapturingEvaluationModel {
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
   ) {}
 
-  async complete(request: {
-    readonly fixture: EvaluationFixture;
-    readonly adapter: AdapterKind;
-    readonly prompt: string;
-    readonly invariantContext?: {
-      readonly knownFacts: readonly string[];
-      readonly knownConstraints: readonly string[];
-    };
-  }): Promise<unknown> {
+  async complete(request: ModelRequest): Promise<unknown> {
     const context = request.invariantContext === undefined
       ? "No additional invariant context is available."
-      : "Invariant context. Known facts: " + request.invariantContext.knownFacts.join(", ") +
-        ". Known constraints: " + request.invariantContext.knownConstraints.join(", ") + ".";
+      : "Authorized Invariant tool result from domain.evaluate. Request and response: " +
+        JSON.stringify(request.invariantContext);
     const body = {
       model: this.config.model,
       temperature: 0,
@@ -106,7 +185,7 @@ class OpenAICompatibleModel implements CapturingEvaluationModel {
           role: "system",
           content: "Return only JSON with status, answer, facts, and constraints. " +
             "status must be completed, missing, or timeout; answer is a string or null; " +
-            "facts and constraints are arrays of exact identifiers. " + context,
+            "facts and constraints are arrays of exact identifiers. Do not invent evidence. " + context,
         },
         { role: "user", content: request.prompt },
       ],
@@ -189,6 +268,11 @@ function environmentOverrides(
   return resolveLiveEvaluationConfig(config, {
     model: env.LIVE_EVAL_MODEL?.trim() || env.OPENAI_MODEL?.trim() || config.model,
     baseUrl: env.LIVE_EVAL_BASE_URL?.trim() || env.OPENAI_BASE_URL?.trim() || config.baseUrl,
+    mcpUrl: env.LIVE_EVAL_MCP_URL?.trim() || env.INVARIANT_MCP_URL?.trim() || config.mcpUrl,
+    workspace: env.LIVE_EVAL_WORKSPACE?.trim() || config.workspace,
+    domain: env.LIVE_EVAL_DOMAIN?.trim() || config.domain,
+    domainVersion: env.LIVE_EVAL_DOMAIN_VERSION?.trim() || config.domainVersion,
+    function: env.LIVE_EVAL_DOMAIN_FUNCTION?.trim() || config.function,
   });
 }
 
@@ -232,6 +316,7 @@ export async function runLiveEvaluationCommand(
       config,
       OFFLINE_EVALUATION_FIXTURES,
       () => new OpenAICompatibleModel(config, credentials.apiKey),
+      () => new HttpInvariantToolClient(config, credentials.mcpToken),
     );
     const report = aggregateLiveReport(artifacts, OFFLINE_EVALUATION_FIXTURES, new Date().toISOString());
     const outputDir = await saveArtifacts(config, artifacts, report);

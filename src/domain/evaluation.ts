@@ -83,7 +83,37 @@ export interface ModelRequest {
   readonly invariantContext?: {
     readonly knownFacts: readonly string[];
     readonly knownConstraints: readonly string[];
+  } | {
+    readonly tool: 'domain.evaluate';
+    readonly request: InvariantToolRequest;
+    readonly response: unknown;
   };
+}
+
+/** The explicit request contract used by the stored `domain.evaluate` tool. */
+export interface InvariantToolRequest {
+  readonly workspace: string;
+  readonly domain: string;
+  readonly version: string;
+  readonly function: string;
+  readonly args: unknown;
+}
+
+export interface InvariantToolCapture {
+  readonly request: InvariantToolRequest;
+  readonly response: unknown;
+}
+
+export interface InvariantToolClient {
+  evaluate(request: InvariantToolRequest): Promise<unknown>;
+  takeLastCall?(): InvariantToolCapture | null;
+}
+
+export interface EvaluationRunOptions {
+  /** Injected only by the live runner; no network is implied by this type. */
+  readonly invariantToolClient?: InvariantToolClient;
+  /** Builds a request without copying fixture ground-truth fields into it. */
+  readonly invariantToolRequest?: (fixture: EvaluationFixture) => InvariantToolRequest;
 }
 
 export interface EvaluationModel {
@@ -92,7 +122,7 @@ export interface EvaluationModel {
 
 export interface EvaluationAdapter {
   readonly kind: AdapterKind;
-  run(fixture: EvaluationFixture, model: EvaluationModel): Promise<TrialRecord>;
+  run(fixture: EvaluationFixture, model: EvaluationModel, options?: EvaluationRunOptions): Promise<TrialRecord>;
 }
 
 const SCORE_POINTS: Readonly<Record<ScoreLabel, -1 | 0 | 1>> = {
@@ -330,15 +360,30 @@ function makeTrialRecord(adapter: AdapterKind, fixture: EvaluationFixture, rawRe
 function createAdapter(kind: AdapterKind): EvaluationAdapter {
   return {
     kind,
-    async run(fixtureInput, model) {
+    async run(fixtureInput, model, options = {}) {
       const fixture = validateFixture(fixtureInput);
+      let invariantContext: ModelRequest['invariantContext'];
+      if (kind === 'llm-invariant' && options.invariantToolClient !== undefined && options.invariantToolRequest !== undefined) {
+        const toolRequest = options.invariantToolRequest(fixture);
+        const toolResponse = await options.invariantToolClient.evaluate(toolRequest);
+        invariantContext = {
+          tool: 'domain.evaluate',
+          request: toolRequest,
+          response: toolResponse,
+        };
+      } else if (kind === 'llm-invariant') {
+        // Preserve the standalone #15 adapter contract for its own offline
+        // harness. The live runner always supplies the tool boundary above.
+        invariantContext = {
+          knownFacts: fixture.knownFacts,
+          knownConstraints: fixture.knownConstraints,
+        };
+      }
       const request: ModelRequest = {
         fixture,
         adapter: kind,
         prompt: fixture.prompt,
-        ...(kind === 'llm-invariant'
-          ? { invariantContext: { knownFacts: fixture.knownFacts, knownConstraints: fixture.knownConstraints } }
-          : {}),
+        ...(invariantContext === undefined ? {} : { invariantContext }),
       };
       const rawResponse = await model.complete(request);
       return makeTrialRecord(kind, fixture, rawResponse);

@@ -24,6 +24,9 @@ import {
   llmInvariantAdapter,
   llmOnlyAdapter,
   type EvaluationFixture,
+  type InvariantToolCapture,
+  type InvariantToolClient,
+  type InvariantToolRequest,
   type ModelRequest,
 } from "./evaluation";
 
@@ -69,6 +72,34 @@ class FakeModel implements CapturingEvaluationModel {
   }
 }
 
+class RecordedInvariantToolClient implements InvariantToolClient {
+  readonly requests: InvariantToolRequest[] = [];
+  private capture: InvariantToolCapture | null = null;
+
+  async evaluate(request: InvariantToolRequest): Promise<unknown> {
+    this.requests.push(request);
+    const response = {
+      status: "resolved",
+      decision: "allow",
+      value: true,
+      workspace: request.workspace,
+      domain: request.domain,
+      version: request.version,
+      function: request.function,
+      trace: [{ nodeId: "node.tool" }],
+      provenance: { functionId: "function.tool", ruleIds: ["rule.tool"] },
+    };
+    this.capture = { request, response };
+    return response;
+  }
+
+  takeLastCall(): InvariantToolCapture | null {
+    const value = this.capture;
+    this.capture = null;
+    return value;
+  }
+}
+
 describe("live evaluation configuration and recording", () => {
   it("validates the smoke default and command overrides without I/O", () => {
     expect(DEFAULT_LIVE_EVALUATION_CONFIG.trialsPerCase).toBe(1);
@@ -83,8 +114,11 @@ describe("live evaluation configuration and recording", () => {
   });
 
   it("fails credential validation before any provider call", () => {
-    expect(() => resolveLiveCredentials({})).toThrow(/no provider call was attempted/);
-    expect(resolveLiveCredentials({ LIVE_EVAL_API_KEY: "key" }).apiKey).toBe("key");
+    expect(() => resolveLiveCredentials({})).toThrow(/no provider or MCP call was attempted/);
+    expect(resolveLiveCredentials({ LIVE_EVAL_API_KEY: "key", LIVE_EVAL_MCP_TOKEN: "mcp" })).toMatchObject({
+      apiKey: "key",
+      mcpToken: "mcp",
+    });
   });
 
   it("redacts credentials recursively, including raw output and tool calls", () => {
@@ -100,10 +134,31 @@ describe("live evaluation configuration and recording", () => {
   it("runs both injected adapters, records redacted evidence, and rescoring is offline", async () => {
     const fixture = fixtureById("evaluation-v0.threshold");
     const config = resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG, { trialsPerCase: 1 });
-    const artifacts = await runLiveEvaluation(config, [fixture], () => new FakeModel(responseFor(fixture)));
+    const toolClient = new RecordedInvariantToolClient();
+    const artifacts = await runLiveEvaluation(
+      config,
+      [fixture],
+      () => new FakeModel(responseFor(fixture)),
+      () => toolClient,
+    );
     expect(artifacts).toHaveLength(2);
     expect(artifacts.map((item) => item.adapter)).toEqual(["llm-only", "llm-invariant"]);
-    expect(artifacts[1].request?.invariantContext?.knownFacts).toContain("risk.score");
+    expect(toolClient.requests).toHaveLength(1);
+    expect(toolClient.requests[0]).toMatchObject({
+      workspace: "evaluation",
+      domain: "evaluation-v0",
+      version: "v0",
+      function: "evaluate",
+      args: { fixtureId: fixture.id, prompt: fixture.prompt },
+    });
+    expect(artifacts[1].request?.invariantContext).toMatchObject({
+      tool: "domain.evaluate",
+      request: toolClient.requests[0],
+      response: { status: "resolved", workspace: "evaluation" },
+    });
+    expect(artifacts[1].invariantToolRequest).toMatchObject(toolClient.requests[0]);
+    expect(artifacts[1].invariantToolResponse).toMatchObject({ status: "resolved" });
+    expect(JSON.stringify(artifacts[1].invariantToolRequest)).not.toContain("knownFacts");
     expect(artifacts[0].rawOutput).toMatchObject({ authorization: "[REDACTED]", api_key: "[REDACTED]" });
     expect(artifacts[0].toolCalls[0]).toEqual({ authorization: "[REDACTED]" });
     const reloaded = deserializeLiveTrial(serializeLiveTrial(artifacts[0]));

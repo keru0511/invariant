@@ -10,6 +10,9 @@ import {
   type AdapterKind,
   type EvaluationFixture,
   type EvaluationModel,
+  type InvariantToolCapture,
+  type InvariantToolClient,
+  type InvariantToolRequest,
   type ScoreLabel,
   type ScoreResult,
   type TrialRecord,
@@ -27,6 +30,11 @@ export interface LiveEvaluationConfig {
   readonly outputDir: string;
   readonly model: string;
   readonly baseUrl: string;
+  readonly mcpUrl: string;
+  readonly workspace: string;
+  readonly domain: string;
+  readonly domainVersion: string;
+  readonly function: string;
   readonly timeoutMs: number;
 }
 
@@ -37,6 +45,11 @@ export const DEFAULT_LIVE_EVALUATION_CONFIG: LiveEvaluationConfig = Object.freez
   outputDir: "artifacts/live-evaluation",
   model: "gpt-4o-mini",
   baseUrl: "https://api.openai.com/v1",
+  mcpUrl: "http://localhost:8787/mcp",
+  workspace: "evaluation",
+  domain: "evaluation-v0",
+  domainVersion: "v0",
+  function: "evaluate",
   timeoutMs: 30_000,
 });
 
@@ -46,6 +59,11 @@ export interface LiveEvaluationCliOptions {
   readonly outputDir?: string;
   readonly model?: string;
   readonly baseUrl?: string;
+  readonly mcpUrl?: string;
+  readonly workspace?: string;
+  readonly domain?: string;
+  readonly domainVersion?: string;
+  readonly function?: string;
   readonly timeoutMs?: number;
   readonly help: boolean;
 }
@@ -111,6 +129,11 @@ export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConf
     outputDir: text(value.outputDir, "outputDir"),
     model: text(value.model, "model"),
     baseUrl: httpUrl(value.baseUrl, "baseUrl"),
+    mcpUrl: httpUrl(value.mcpUrl, "mcpUrl"),
+    workspace: text(value.workspace, "workspace"),
+    domain: text(value.domain, "domain"),
+    domainVersion: text(value.domainVersion, "domainVersion"),
+    function: text(value.function, "function"),
     timeoutMs: positiveInteger(value.timeoutMs, "timeoutMs"),
   });
 }
@@ -153,6 +176,11 @@ export function parseLiveEvaluationArgs(args: readonly string[]): LiveEvaluation
     outputDir?: string;
     model?: string;
     baseUrl?: string;
+    mcpUrl?: string;
+    workspace?: string;
+    domain?: string;
+    domainVersion?: string;
+    function?: string;
     timeoutMs?: number;
     help: boolean;
   } = { help: false };
@@ -172,6 +200,11 @@ export function parseLiveEvaluationArgs(args: readonly string[]): LiveEvaluation
       case "--output-dir": result.outputDir = read(); break;
       case "--model": result.model = read(); break;
       case "--base-url": result.baseUrl = read(); break;
+      case "--mcp-url": result.mcpUrl = read(); break;
+      case "--workspace": result.workspace = read(); break;
+      case "--domain": result.domain = read(); break;
+      case "--domain-version": result.domainVersion = read(); break;
+      case "--function": result.function = read(); break;
       case "--timeout-ms": result.timeoutMs = argInteger(read(), "--timeout-ms"); break;
       default:
         throw new LiveEvaluationConfigError("INVALID_ARGUMENT", "Unknown argument: " + raw + ".");
@@ -189,25 +222,32 @@ export function applyLiveEvaluationCliOptions(
     outputDir: options.outputDir ?? config.outputDir,
     model: options.model ?? config.model,
     baseUrl: options.baseUrl ?? config.baseUrl,
+    mcpUrl: options.mcpUrl ?? config.mcpUrl,
+    workspace: options.workspace ?? config.workspace,
+    domain: options.domain ?? config.domain,
+    domainVersion: options.domainVersion ?? config.domainVersion,
+    function: options.function ?? config.function,
     timeoutMs: options.timeoutMs ?? config.timeoutMs,
   });
 }
 
 export interface LiveCredentials {
   readonly apiKey: string;
+  readonly mcpToken: string;
 }
 
 export function resolveLiveCredentials(
   env: Readonly<Record<string, string | undefined>>,
 ): LiveCredentials {
   const apiKey = env.LIVE_EVAL_API_KEY?.trim() || env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
+  const mcpToken = env.LIVE_EVAL_MCP_TOKEN?.trim() || env.INVARIANT_MCP_TOKEN?.trim();
+  if (!apiKey || !mcpToken) {
     throw new LiveEvaluationConfigError(
       "MISSING_CREDENTIALS",
-      "Live evaluation requires credentials. Set LIVE_EVAL_API_KEY or OPENAI_API_KEY; no provider call was attempted.",
+      "Live evaluation requires credentials for both the provider and MCP. Set LIVE_EVAL_API_KEY or OPENAI_API_KEY plus LIVE_EVAL_MCP_TOKEN or INVARIANT_MCP_TOKEN; no provider or MCP call was attempted.",
     );
   }
-  return Object.freeze({ apiKey });
+  return Object.freeze({ apiKey, mcpToken });
 }
 
 const SENSITIVE_KEY = /^(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|secret|password|cookie|set-cookie)$/i;
@@ -237,6 +277,10 @@ export interface LiveCallRequest {
   readonly invariantContext?: {
     readonly knownFacts: readonly string[];
     readonly knownConstraints: readonly string[];
+  } | {
+    readonly tool: 'domain.evaluate';
+    readonly request: InvariantToolRequest;
+    readonly response: unknown;
   };
 }
 
@@ -244,6 +288,8 @@ export interface LiveCallCapture {
   readonly request: LiveCallRequest;
   readonly rawOutput: unknown;
   readonly toolCalls: readonly unknown[];
+  readonly invariantToolRequest?: InvariantToolRequest;
+  readonly invariantToolResponse?: unknown;
 }
 
 export interface CapturingEvaluationModel extends EvaluationModel {
@@ -269,6 +315,8 @@ export interface LiveTrialArtifact {
   readonly response: unknown | null;
   readonly rawOutput: unknown | null;
   readonly toolCalls: readonly unknown[];
+  readonly invariantToolRequest: InvariantToolRequest | null;
+  readonly invariantToolResponse: unknown | null;
   readonly request: LiveCallRequest | null;
   readonly score: ScoreResult | null;
   readonly error: LiveTrialError | null;
@@ -281,6 +329,28 @@ function makeTrialId(adapter: AdapterKind, fixture: EvaluationFixture, number: n
 function takeCapture(model: EvaluationModel): LiveCallCapture | null {
   const candidate = model as CapturingEvaluationModel;
   return typeof candidate.takeLastCall === "function" ? candidate.takeLastCall() : null;
+}
+
+function takeToolCapture(client: InvariantToolClient | undefined): InvariantToolCapture | null {
+  return client !== undefined && typeof client.takeLastCall === "function" ? client.takeLastCall() : null;
+}
+
+function mergeCaptures(
+  adapter: AdapterKind,
+  fixture: EvaluationFixture,
+  modelCapture: LiveCallCapture | null,
+  toolCapture: InvariantToolCapture | null,
+): LiveCallCapture | null {
+  if (modelCapture === null && toolCapture === null) return null;
+  return {
+    request: modelCapture?.request ?? { adapter, prompt: fixture.prompt },
+    rawOutput: modelCapture?.rawOutput ?? null,
+    toolCalls: modelCapture?.toolCalls ?? [],
+    ...(toolCapture === null ? {} : {
+      invariantToolRequest: toolCapture.request,
+      invariantToolResponse: toolCapture.response,
+    }),
+  };
 }
 
 function safeError(error: unknown): LiveTrialError {
@@ -310,6 +380,8 @@ export function recordLiveTrial(
     response: redactForRecording(record.response),
     rawOutput: capture === null ? null : redactForRecording(capture.rawOutput),
     toolCalls: capture === null ? [] : redactForRecording(capture.toolCalls) as readonly unknown[],
+    invariantToolRequest: capture?.invariantToolRequest === undefined ? null : redactForRecording(capture.invariantToolRequest) as InvariantToolRequest,
+    invariantToolResponse: capture?.invariantToolResponse === undefined ? null : redactForRecording(capture.invariantToolResponse),
     request: capture === null ? null : redactForRecording(capture.request) as LiveCallRequest,
     score: record.score,
     error: null,
@@ -335,6 +407,8 @@ export function recordLiveError(
     response: null,
     rawOutput: capture === null ? null : redactForRecording(capture.rawOutput),
     toolCalls: capture === null ? [] : redactForRecording(capture.toolCalls) as readonly unknown[],
+    invariantToolRequest: capture?.invariantToolRequest === undefined ? null : redactForRecording(capture.invariantToolRequest) as InvariantToolRequest,
+    invariantToolResponse: capture?.invariantToolResponse === undefined ? null : redactForRecording(capture.invariantToolResponse),
     request: capture === null ? null : redactForRecording(capture.request) as LiveCallRequest,
     score: null,
     error: safeError(error),
@@ -344,14 +418,19 @@ export function recordLiveError(
 export async function runLiveEvaluation(
   config: LiveEvaluationConfig,
   fixtures: readonly EvaluationFixture[] = OFFLINE_EVALUATION_FIXTURES,
-  createModel: (adapter: AdapterKind) => EvaluationModel | Promise<EvaluationModel>,
+  createModel: (adapter: AdapterKind, invariantToolClient?: InvariantToolClient) => EvaluationModel | Promise<EvaluationModel>,
+  createInvariantToolClient: () => InvariantToolClient | Promise<InvariantToolClient>,
 ): Promise<readonly LiveTrialArtifact[]> {
   const artifacts: LiveTrialArtifact[] = [];
   for (const adapter of [llmOnlyAdapter, llmInvariantAdapter]) {
     let model: EvaluationModel | undefined;
     let factoryError: unknown;
+    let invariantToolClient: InvariantToolClient | undefined;
     try {
-      model = await createModel(adapter.kind);
+      if (adapter.kind === "llm-invariant") {
+        invariantToolClient = await createInvariantToolClient();
+      }
+      model = await createModel(adapter.kind, invariantToolClient);
     } catch (error) {
       factoryError = error;
     }
@@ -362,10 +441,33 @@ export async function runLiveEvaluation(
           continue;
         }
         try {
-          const record = await adapter.run(fixture, model);
-          artifacts.push(recordLiveTrial(adapter.kind, fixture, trialNumber, record, takeCapture(model)));
+          const record = await adapter.run(fixture, model, adapter.kind === "llm-invariant"
+            ? {
+              invariantToolClient: invariantToolClient as InvariantToolClient,
+              invariantToolRequest: (candidate) => ({
+                workspace: config.workspace,
+                domain: config.domain,
+                version: config.domainVersion,
+                function: config.function,
+                args: { fixtureId: candidate.id, prompt: candidate.prompt },
+              }),
+            }
+            : undefined);
+          artifacts.push(recordLiveTrial(
+            adapter.kind,
+            fixture,
+            trialNumber,
+            record,
+            mergeCaptures(adapter.kind, fixture, takeCapture(model), takeToolCapture(invariantToolClient)),
+          ));
         } catch (error) {
-          artifacts.push(recordLiveError(adapter.kind, fixture, trialNumber, error, takeCapture(model)));
+          artifacts.push(recordLiveError(
+            adapter.kind,
+            fixture,
+            trialNumber,
+            error,
+            mergeCaptures(adapter.kind, fixture, takeCapture(model), takeToolCapture(invariantToolClient)),
+          ));
         }
       }
     }
