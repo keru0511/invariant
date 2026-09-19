@@ -17,6 +17,8 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     steps:
+      - id: npm
+        run: npm install --global npm@11.9.0 --no-audit --no-fund && test "$(npm --version)" = "11.9.0"
       - id: install
         run: npm ci
       - id: typecheck
