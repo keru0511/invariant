@@ -19,6 +19,7 @@ export const MANDATORY_STEP_IDS = ['npm', 'install', 'typecheck', 'tests'];
 export const LOCAL_TRIGGER = 'push';
 export const ALLOWED_IGNORED_PREFIXES = [
   'node_modules/',
+  '.ci-toolchain/',
   '.actrun-runs/',
   '_build/',
 ];
@@ -234,10 +235,10 @@ export function validateWorkflowDefinition(source) {
         workflowContractError(`unapproved uses entry in step ${step.id}`);
       }
       const requiredCommand = {
-        npm: 'npm install --global npm@11.9.0 --no-audit --no-fund && test "$(npm --version)" = "11.9.0"',
-        install: 'npm ci',
-        typecheck: 'npm run typecheck',
-        tests: 'npm test',
+        npm: 'npm install --prefix .ci-toolchain --no-save --no-package-lock --ignore-scripts npm@11.9.0 && test "$(node .ci-toolchain/node_modules/npm/bin/npm-cli.js --version)" = "11.9.0"',
+        install: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js ci',
+        typecheck: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js run typecheck',
+        tests: 'node .ci-toolchain/node_modules/npm/bin/npm-cli.js test',
       }[step.id];
       if (runLines.length !== 1 || runLines[0] !== `        run: ${requiredCommand}`) {
         workflowContractError(`step ${step.id} must run ${requiredCommand}`);
