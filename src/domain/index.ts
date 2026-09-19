@@ -33,3 +33,6 @@ export * from './runtime';
 export * from './evaluator';
 export * from './patch';
 export * from './conversation-patch';
+export * from './test-runner';
+export * from './evaluation';
+export * from './evaluation-fixtures';

@@ -1,0 +1,13 @@
+{
+  "version": "evaluation-v0",
+  "id": "evaluation-v0.exception",
+  "family": "exception",
+  "prompt": "A refund is requested for a fraud exception. Decide whether to deny it and cite the exception fact.",
+  "knownFacts": ["refund.requested", "exception.fraud-applies", "refund.amount"],
+  "knownConstraints": ["policy.standard-refund"],
+  "expected": {
+    "answer": "deny",
+    "requiredFacts": ["exception.fraud-applies"],
+    "requiredConstraints": []
+  }
+}
