@@ -65,7 +65,30 @@ export interface InvariantToolResult {
 
 /** Injectable boundary for recorded, mock, or live Invariant tool clients. */
 export interface InvariantToolClient {
-  getContext(request: InvariantToolRequest): Promise<InvariantToolResult>;
+  getContext?(request: InvariantToolRequest): Promise<InvariantToolResult>;
+  evaluate?(request: DomainEvaluateRequest): Promise<unknown>;
+  takeLastCall?(): InvariantToolCapture | null;
+}
+
+/** Explicit #14 domain.evaluate request used by credential-backed evaluation. */
+export interface DomainEvaluateRequest {
+  readonly workspace: string;
+  readonly domain: string;
+  readonly version: string;
+  readonly function: string;
+  readonly args: unknown;
+}
+
+export interface InvariantToolCapture {
+  readonly request: DomainEvaluateRequest;
+  readonly response: unknown;
+}
+
+export interface EvaluationRunOptions {
+  /** Injected only by the live runner; no network is implied by this type. */
+  readonly invariantToolClient: InvariantToolClient;
+  /** Builds an explicit domain.evaluate request without copying fixture truth. */
+  readonly invariantToolRequest: (fixture: EvaluationFixture) => DomainEvaluateRequest;
 }
 
 export interface RedactedInvariantToolEvidence {
@@ -129,7 +152,11 @@ export interface ModelRequest {
   readonly adapter: AdapterKind;
   readonly prompt: string;
   /** Context returned by InvariantToolClient, never read from the scorer fixture. */
-  readonly invariantContext?: Pick<InvariantToolResult, 'knownFacts' | 'knownConstraints'>;
+  readonly invariantContext?: Pick<InvariantToolResult, 'knownFacts' | 'knownConstraints'> | {
+    readonly tool: 'domain.evaluate';
+    readonly request: DomainEvaluateRequest;
+    readonly response: unknown;
+  };
 }
 
 export interface EvaluationModel {
@@ -141,7 +168,7 @@ export interface EvaluationAdapter {
   run(
     fixture: EvaluationFixture,
     model: EvaluationModel,
-    invariantToolClient?: InvariantToolClient,
+    invariantToolClient?: InvariantToolClient | EvaluationRunOptions,
   ): Promise<TrialRecord>;
 }
 
@@ -157,6 +184,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function isEvaluationRunOptions(value: InvariantToolClient | EvaluationRunOptions): value is EvaluationRunOptions {
+  return isPlainObject(value) && 'invariantToolClient' in value && 'invariantToolRequest' in value;
 }
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {
@@ -426,25 +457,46 @@ function createAdapter(kind: AdapterKind): EvaluationAdapter {
     kind,
     async run(fixtureInput, model, invariantToolClient) {
       const fixture = validateFixture(fixtureInput);
-      let invariantContext: Pick<InvariantToolResult, 'knownFacts' | 'knownConstraints'> | undefined;
+      let invariantContext: ModelRequest['invariantContext'];
       let invariantToolEvidence: RedactedInvariantToolEvidence | undefined;
       if (kind === 'llm-invariant') {
         if (invariantToolClient === undefined) {
           throw new Error('llm-invariant adapter requires an InvariantToolClient.');
         }
-        const toolRequest: InvariantToolRequest = {
-          version: INVARIANT_TOOL_REQUEST_VERSION,
-          tool: INVARIANT_TOOL_NAME,
-          fixtureId: fixture.id,
-          fixtureVersion: fixture.version,
-          prompt: fixture.prompt,
-        };
-        const toolResult = validateInvariantToolResult(await invariantToolClient.getContext(toolRequest));
-        invariantContext = {
-          knownFacts: [...toolResult.knownFacts],
-          knownConstraints: [...toolResult.knownConstraints],
-        };
-        invariantToolEvidence = redactedToolEvidence(toolRequest, toolResult);
+        const options = isEvaluationRunOptions(invariantToolClient) ? invariantToolClient : undefined;
+        const client: InvariantToolClient = options === undefined
+          ? invariantToolClient as InvariantToolClient
+          : options.invariantToolClient;
+        if (options !== undefined) {
+          if (typeof client.evaluate !== 'function') {
+            throw new Error('Live InvariantToolClient must implement evaluate.');
+          }
+          const toolRequest = options.invariantToolRequest(fixture);
+          const toolResponse = await client.evaluate(toolRequest);
+          invariantContext = {
+            tool: 'domain.evaluate',
+            request: toolRequest,
+            response: toolResponse,
+          };
+        } else {
+          const legacyClient = client as InvariantToolClient;
+          if (typeof legacyClient.getContext !== 'function') {
+            throw new Error('InvariantToolClient must implement getContext.');
+          }
+          const toolRequest: InvariantToolRequest = {
+            version: INVARIANT_TOOL_REQUEST_VERSION,
+            tool: INVARIANT_TOOL_NAME,
+            fixtureId: fixture.id,
+            fixtureVersion: fixture.version,
+            prompt: fixture.prompt,
+          };
+          const toolResult = validateInvariantToolResult(await legacyClient.getContext(toolRequest));
+          invariantContext = {
+            knownFacts: [...toolResult.knownFacts],
+            knownConstraints: [...toolResult.knownConstraints],
+          };
+          invariantToolEvidence = redactedToolEvidence(toolRequest, toolResult);
+        }
       }
       const request: ModelRequest = {
         fixture: visibleFixture(fixture),
@@ -468,7 +520,7 @@ export function runOfflineTrial(
   adapter: EvaluationAdapter,
   fixture: EvaluationFixture,
   model: EvaluationModel,
-  invariantToolClient?: InvariantToolClient,
+  invariantToolClient?: InvariantToolClient | EvaluationRunOptions,
 ): Promise<TrialRecord> {
   return adapter.run(fixture, model, invariantToolClient);
 }

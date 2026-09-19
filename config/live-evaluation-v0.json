@@ -1,0 +1,15 @@
+{
+  "version": "live-evaluation-v0",
+  "fixtureVersion": "evaluation-v0",
+  "trialsPerCase": 1,
+  "outputDir": "artifacts/live-evaluation",
+  "model": "gpt-4o-mini",
+  "baseUrl": "https://api.openai.com/v1",
+  "mcpUrl": "http://localhost:8787/mcp",
+  "workspace": "evaluation",
+  "domain": "evaluation-v0",
+  "domainVersion": "v0",
+  "function": "evaluate",
+  "timeoutMs": 30000
+}
+
