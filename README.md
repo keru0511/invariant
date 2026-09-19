@@ -27,7 +27,15 @@ npm run typecheck
 
 # テスト実行
 npm test
+
+# 共有CI workflowをローカルで実行（固定された前提条件が必要）
+npm run ci:local
+
+# 実runnerを使う分離smoke（actrunの互換性も検証）
+npm run test:ci-gate
 ```
+
+ローカルCIゲートの前提条件と検証状況は [`docs/ci-local.md`](docs/ci-local.md) に記録しています。
 
 ## エンドポイント
 

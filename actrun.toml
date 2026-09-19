@@ -1,0 +1,3 @@
+workspace_mode = "worktree"
+include_dirty = false
+local_skip_actions = ["actions/checkout", "actions/setup-node"]
