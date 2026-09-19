@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDecisionRecord, DecisionRecordJSON } from './decision-record';
 import { compareDecisionRecords } from './decision-comparison';
 
-const context = {
+const context: DecisionRecordJSON['contextSnapshot'] = {
   version: 0 as const,
   hardConstraints: [{ id: 'https', description: 'Use HTTPS.' }],
   objectives: [{ id: 'cost', description: 'Minimize cost.', weight: 1 }],
@@ -71,6 +71,42 @@ describe('compareDecisionRecords', () => {
     });
   });
 
+  it('AC: unknown changes produce an exact before/after diff', () => {
+    const actual = compareDecisionRecords(
+      resolved(),
+      resolved({ contextSnapshot: withContext({
+        unknowns: [{ id: 'traffic', description: 'Traffic volume is now known.' }],
+      }) }),
+    );
+
+    expect(actual).toEqual({
+      status: 'inputs_changed',
+      changed_inputs: [{
+        kind: 'unknown',
+        id: 'traffic',
+        before: 'Traffic is unknown.',
+        after: 'Traffic volume is now known.',
+      }],
+    });
+  });
+
+  it('AC: out-of-scope changes produce an exact before/after diff', () => {
+    const actual = compareDecisionRecords(
+      resolved(),
+      resolved({ contextSnapshot: withContext({ outOfScope: ['legacy migration'] }) }),
+    );
+
+    expect(actual).toEqual({
+      status: 'inputs_changed',
+      changed_inputs: [{
+        kind: 'out_of_scope',
+        id: 'legacy migration',
+        before: null,
+        after: 'legacy migration',
+      }],
+    });
+  });
+
   it('AC: constraint changes produce an exact before/after diff', () => {
     const actual = compareDecisionRecords(
       resolved(),
@@ -129,6 +165,41 @@ describe('compareDecisionRecords', () => {
     expect(first.recommendationId).toBeNull();
     expect(actual).toEqual({ status: 'consistent', changed_inputs: [] });
   });
+
+  it('AC: same recommendationId with evaluation or trace differences is consistent', () => {
+    const actual = compareDecisionRecords(
+      resolved(),
+      resolved({
+        evaluation: {
+          status: 'resolved',
+          result: false,
+          trace: [{ step: 0, message: 'A different evaluator trace.' }],
+        },
+      }),
+    );
+
+    expect(actual).toEqual({ status: 'consistent', changed_inputs: [] });
+  });
+
+  it.each(['ambiguous', 'conflict'] as const)(
+    'AC: %s DecisionRecord state is preserved during comparison',
+    (status) => {
+      const record = createDecisionRecord({
+        domainVersion: 'domain-v0',
+        contextSnapshot: context,
+        evaluation: { status, result: null, trace: [] },
+        recommendationId: null,
+      });
+      const roundTripped = createDecisionRecord(JSON.parse(JSON.stringify(record)));
+
+      expect(roundTripped.evaluation.status).toBe(status);
+      expect(roundTripped.recommendationId).toBeNull();
+      expect(compareDecisionRecords(record, roundTripped)).toEqual({
+        status: 'consistent',
+        changed_inputs: [],
+      });
+    },
+  );
 
   it('AC: caller-supplied diffs are ignored and output is deterministic', () => {
     const left = { ...resolved().toJSON(), changed_inputs: [{ kind: 'fact', id: 'fake', before: 1, after: 2 }] };
