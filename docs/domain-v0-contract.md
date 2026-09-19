@@ -98,3 +98,24 @@ leave more than one candidate, distinct from a conflicting allow/deny result.
 
 The cases cover valid decisions, the age boundary at `18`, invalid input type,
 missing input/unresolved evaluation, and a same-priority allow/deny conflict.
+
+## Semantic validation
+
+Structural parsing and semantic validation are separate checks. Use
+`validateGoldenFixture(fixture, function)` for one fixture or
+`validateDomainFixtures(domain, fixtures)` for a catalog and its
+fixtures. `parseGoldenFixture(fixture, function)` may be used when parsing and
+semantic validation should be one boundary operation.
+
+Semantic failures are typed `DomainParseError` values with stable `code` and
+`path` fields. Failed multi-document validation also exposes the complete
+`errors` array in deterministic path/code/message order; callers can inspect
+all diagnostics without relying on exception text. Validation creates frozen
+canonical values and does not mutate or retain caller-owned input objects.
+
+At the highest priority, a matching allow and deny set is a `conflict` with a
+`RULE_CONFLICT` diagnostic. Multiple matching rules that all choose the same
+decision remain `ambiguous` with an `AMBIGUOUS_MATCH` diagnostic; they are not
+silently collapsed into `allow` or `deny`. Same-decision ambiguous rule IDs
+are normalized by stable identifier order, while conflict candidates retain
+policy order.
