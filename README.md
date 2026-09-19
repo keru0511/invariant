@@ -33,6 +33,9 @@ npm run ci:local
 
 # 実runnerを使う分離smoke（actrunの互換性も検証）
 npm run test:ci-gate
+
+# リポジトリローカルの pre-push CI hook を有効化（冪等）
+npm run hooks:install
 ```
 
 ローカルCIゲートの前提条件と検証状況は [`docs/ci-local.md`](docs/ci-local.md) に記録しています。
