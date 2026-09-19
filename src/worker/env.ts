@@ -1,3 +1,5 @@
+import type { D1Database } from '@cloudflare/workers-types';
+
 /**
  * Cloudflare Worker bindings used by the HTTP/MCP boundary.
  *
@@ -6,6 +8,8 @@
  * runtime; the production default is always Cloudflare Access verification.
  */
 export interface Env {
+  /** D1 database containing workspaces, memberships, and domain versions. */
+  readonly DB?: D1Database;
   /** Defaults to `production` when omitted. */
   readonly INVARIANT_ENVIRONMENT?: 'production' | 'test';
 

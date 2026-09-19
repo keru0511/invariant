@@ -50,6 +50,11 @@ export interface EvaluationError {
 export interface EvaluationResult {
   readonly status: DomainResultStatus;
   readonly value: boolean | null;
+  /**
+   * Function IDs selected by the name lookup. Duplicate-name ambiguity keeps
+   * all IDs here in deterministic lexical order.
+   */
+  readonly matchedFunctionIds: readonly string[];
   readonly matchedRuleIds: readonly string[];
   readonly unresolvedPaths: readonly string[];
   readonly errors: readonly EvaluationError[];
@@ -123,12 +128,17 @@ function result(
   domainFunction?: DomainFunction,
   details: {
     value?: boolean | null;
+    matchedFunctionIds?: readonly string[];
     matchedRuleIds?: readonly string[];
     unresolvedPaths?: readonly string[];
     errors?: readonly EvaluationError[];
     trace?: readonly DomainTraceEvent[];
   } = {},
 ): EvaluationResult {
+  const matchedFunctionIds = freeze([
+    ...(details.matchedFunctionIds
+      ?? (domainFunction === undefined ? [] : [domainFunction.id])),
+  ]);
   const matchedRuleIds = freeze([...(details.matchedRuleIds ?? [])]);
   const unresolvedPaths = freeze([...(details.unresolvedPaths ?? [])]);
   const errors = freeze([...(details.errors ?? [])]);
@@ -137,6 +147,7 @@ function result(
   return freeze({
     status,
     value,
+    matchedFunctionIds,
     matchedRuleIds,
     unresolvedPaths,
     errors,
@@ -631,8 +642,16 @@ export function evaluate(domain: Domain | unknown, functionName: string, args: u
     });
   }
   if (matches.length > 1) {
-    return result('error', undefined, {
-      errors: [error('INVALID_FUNCTION', "Function name '" + functionName + "' is ambiguous.", { path: 'functionName' })],
+    const matchedFunctionIds = matches
+      .map((domainFunction) => domainFunction.id)
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+    return result('ambiguous', undefined, {
+      matchedFunctionIds,
+      errors: [error(
+        'AMBIGUOUS_MATCH',
+        "Function name '" + functionName + "' matches multiple declared functions.",
+        { path: 'functionName' },
+      )],
     });
   }
   const domainFunction = matches[0];
