@@ -1,0 +1,58 @@
+# Live v0 evaluation
+
+The live runner compares the two #15 conditions over the versioned
+evaluation-v0 fixtures:
+
+- LLM-only receives the case prompt.
+- LLM+Invariant first calls the authenticated #14 `domain.evaluate` MCP tool
+  with explicit `workspace`, `domain`, `version`, `function`, and `args`
+  fields. It receives the recorded tool result; fixture `knownFacts` and
+  `knownConstraints` are never copied into the model prompt.
+
+Both paths use the #15 adapters and independent scorer. The provider client is
+an OpenAI-compatible chat-completions client and the Invariant client is a
+JSON-RPC/MCP HTTP client. Normal typecheck and test commands never invoke
+either network client.
+
+## Smoke run
+
+The checked-in config has trialsPerCase: 1, which is the small smoke default.
+It runs one trial for every fixture in each condition:
+
+    OPENAI_API_KEY=... LIVE_EVAL_MCP_TOKEN=... npm run eval:live:smoke
+
+LIVE_EVAL_API_KEY is accepted as an alternative. The model and endpoint can
+be overridden with OPENAI_MODEL, OPENAI_BASE_URL, --model, or --base-url. The
+runner also needs `LIVE_EVAL_MCP_TOKEN` (or `INVARIANT_MCP_TOKEN`) for the
+authenticated MCP endpoint. `LIVE_EVAL_MCP_URL`, `LIVE_EVAL_WORKSPACE`,
+`LIVE_EVAL_DOMAIN`, `LIVE_EVAL_DOMAIN_VERSION`, and `LIVE_EVAL_DOMAIN_FUNCTION`
+override the stored-tool target. Missing provider or MCP credentials fail with
+exit code 2 before either network call.
+
+For a larger run, set the number of attempts explicitly:
+
+    OPENAI_API_KEY=... npm run eval:live -- --trials 10 --output-dir artifacts/live-evaluation-large
+
+The CLI also accepts --config, --timeout-ms, and --help. A provider error
+does not disappear: the command records it and exits non-zero after writing
+the report.
+
+## Artifacts
+
+The output directory contains:
+
+- config.json with the effective non-secret configuration;
+- trials/*.json with redacted raw provider output, redacted model tool calls,
+  the actual redacted `domain.evaluate` request/response, condition, case,
+  episode status, and independent score;
+- report.json with per-condition and per-case aggregates, errors,
+  improvements, regressions, and the bounded comparison claim;
+- report.md, the same report in a reviewable form.
+
+Credential-shaped fields and bearer/key-looking strings are replaced before
+writing. Rescoring uses only the saved response and fixture; it does not call
+the provider, MCP endpoint, filesystem, clock, or network.
+
+No live credentials, deployment, or paid provider call is part of normal CI or
+the issue #29 verification run.
+
