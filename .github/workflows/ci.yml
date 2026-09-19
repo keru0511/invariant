@@ -31,6 +31,9 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - id: npm
+        name: npm
+        run: npm install --global npm@11.9.0 --no-audit --no-fund && test "$(npm --version)" = "11.9.0"
       - id: install
         name: install
         run: npm ci
