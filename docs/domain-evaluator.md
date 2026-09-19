@@ -14,13 +14,11 @@ whose leaves must match the function's declared input paths and types.
 Evaluation is three-valued for conditions: `true`, `false`, or `unresolved`.
 Missing facts remain unresolved. Rules with false conditions are ignored;
 unresolved or true conditions at the highest priority block lower-priority
-fall-through. Same-priority allow/deny matches return `conflict`; multiple
-same-priority matches with the same decision return `ambiguous` with the #24
-`AMBIGUOUS_MATCH` error. A default policy decision returns allow/deny only when
-no rule matches.
+fall-through. Same-priority allow/deny matches return `conflict`. A default
+policy decision returns allow/deny only when no rule matches.
 
 Every result has an explicit status (`allow`, `deny`, `unresolved`,
-`ambiguous`, `conflict`, or `error`), a stable trace, and provenance. Invalid function names,
+`conflict`, or `error`), a stable trace, and provenance. Invalid function names,
 argument shapes/types, domain cycles, argument cycles, and excessive nesting
 return `error` with a specific error code. The evaluator does not throw for
 these normal validation failures, mutate caller-owned data, or access network,
@@ -29,3 +27,12 @@ storage, time, Worker APIs, or an LLM.
 The trace is derived only from the parsed function id, node ids, rule ids, and
 fixed traversal order. A direct call uses the stable provenance sentinel
 `fixtureId: "evaluation"`, because it does not have a golden-fixture id.
+
+## Stored example regression tests
+
+`src/domain/test-runner.ts` exposes `runTests(domain)`. It runs the stored #23
+golden examples through `evaluate`, preserving each example ID, source function
+ID, and fixture path in a per-example expected/actual report. Semantic matching
+includes result status, so `unresolved` is not collapsed into another
+`value: null` state. An empty explicitly supplied suite returns `status:
+"empty"`; it is not represented as coverage.
