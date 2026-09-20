@@ -15,5 +15,61 @@
       "age": 21
     }
   },
-  "timeoutMs": 30000
+  "timeoutMs": 30000,
+  "caseTargets": {
+    "evaluation-v0.exception": {
+      "domain": "orders",
+      "version": "v1",
+      "function": "member-age",
+      "args": {
+        "user": {
+          "age": 17
+        }
+      }
+    },
+    "evaluation-v0.missing-fact": {
+      "domain": "orders",
+      "version": "v1",
+      "function": "member-age",
+      "args": {
+        "user": {
+          "age": 21
+        }
+      }
+    },
+    "evaluation-v0.threshold": {
+      "domain": "orders",
+      "version": "v1",
+      "function": "refund",
+      "args": {
+        "order": {
+          "status": "paid",
+          "total": 150
+        }
+      }
+    },
+    "evaluation-v0.long-context-constraint": {
+      "domain": "orders",
+      "version": "v1",
+      "function": "account-review",
+      "args": {
+        "account": {
+          "state": "active",
+          "riskScore": 10,
+          "country": "JP"
+        }
+      }
+    },
+    "evaluation-v0.recommendation-drift": {
+      "domain": "orders",
+      "version": "v1",
+      "function": "refund",
+      "args": {
+        "order": {
+          "status": "paid",
+          "total": 50
+        }
+      }
+    }
+  }
 }
