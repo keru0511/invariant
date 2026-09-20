@@ -136,6 +136,12 @@ function currentBranchInput({ localSha = SHA_A, remoteSha = ZERO_SHA } = {}) {
     + ' refs/heads/feature/one ' + remoteSha + '\n';
 }
 
+async function currentHead(root) {
+  const result = await run('git', ['rev-parse', 'HEAD'], root);
+  expect(result.exitCode).toBe(0);
+  return result.stdout.trim();
+}
+
 describe('pre-push gate execution', () => {
   it('calls npm run ci:local once and propagates its failure status', async () => {
     const root = await createHookFixture();
@@ -147,7 +153,7 @@ describe('pre-push gate execution', () => {
 
     const status = runPrePushHook({
       cwd: join(root, 'nested'),
-      input: currentBranchInput(),
+      input: currentBranchInput({ localSha: await currentHead(root) }),
       spawn: fakeSpawn,
     });
 
@@ -157,6 +163,38 @@ describe('pre-push gate execution', () => {
       args: ['run', 'ci:local'],
       cwd: root,
     }]);
+  });
+
+  it('rejects a pushed SHA that does not match the current HEAD before running CI', async () => {
+    const root = await createHookFixture();
+    const calls = [];
+    expect(() => runPrePushHook({
+      cwd: root,
+      input: currentBranchInput({ localSha: SHA_A }),
+      spawn: (...args) => {
+        calls.push(args);
+        return { status: 0, signal: null, error: null };
+      },
+    })).toThrow(/does not match the pushed local SHA/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects a HEAD change made while local CI is running', async () => {
+    const root = await createHookFixture();
+    const pushedSha = await currentHead(root);
+    const fakeSpawn = (command, args, options) => {
+      const result = spawn('git', ['commit', '--allow-empty', '-qm', 'race'], {
+        cwd: options.cwd,
+        stdio: 'ignore',
+      });
+      expect(result).toBeDefined();
+      return { status: 0, signal: null, error: null };
+    };
+    expect(() => runPrePushHook({
+      cwd: root,
+      input: currentBranchInput({ localSha: pushedSha }),
+      spawn: fakeSpawn,
+    })).toThrow(/HEAD changed during local CI/);
   });
 
   it('does not invoke npm for unsupported input', async () => {
