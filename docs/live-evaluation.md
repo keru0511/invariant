@@ -9,11 +9,13 @@ evaluation-v0 fixtures:
   fields. It receives the recorded tool result; fixture `knownFacts` and
   `knownConstraints` are never copied into the model prompt.
 
-The checked-in smoke target is the repository's domain-v0 demo shape:
-`workspace-a / orders / v1 / member-age` with
-`args: { "user": { "age": 21 } }`. Use `--config`,
-`--args-json`, or the target flags when the authorized deployment uses
-another stored workspace/domain/version.
+The checked-in smoke targets are valid requests for the repository's domain-v0
+demo shape. Each of the five `evaluation-v0` cases has an explicit target in
+`config/live-evaluation-v0.json`; the targets cover `member-age`, `refund`,
+and `account-review` with distinct arguments. The recorded artifact includes
+the exact request and response for each case. Use `--config`, `--args-json`,
+or the target flags when the authorized deployment uses another stored
+workspace/domain/version.
 
 Both paths use the #15 adapters and independent scorer. The provider client is
 an OpenAI-compatible chat-completions client and the Invariant client is a
