@@ -1,5 +1,5 @@
 import { chmod, copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -183,7 +183,7 @@ describe('pre-push gate execution', () => {
     const root = await createHookFixture();
     const pushedSha = await currentHead(root);
     const fakeSpawn = (command, args, options) => {
-      const result = spawn('git', ['commit', '--allow-empty', '-qm', 'race'], {
+      const result = spawnSync('git', ['commit', '--allow-empty', '-qm', 'race'], {
         cwd: options.cwd,
         stdio: 'ignore',
       });
