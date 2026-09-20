@@ -164,11 +164,28 @@ export function runPrePushHook({
   const repoRoot = discoverRepoRoot(cwd);
   const currentBranch = discoverCurrentBranch(repoRoot);
   const update = parsePrePushInput(input, { currentBranch });
+  const currentHeadBeforeGate = runGit(['rev-parse', '--verify', 'HEAD'], repoRoot);
+  if (currentHeadBeforeGate !== update.localSha) {
+    throw new PrePushError(
+      'head-mismatch',
+      'current HEAD ' + currentHeadBeforeGate + ' does not match the pushed local SHA ' + update.localSha,
+    );
+  }
 
   process.stderr.write(
     'pre-push: running local CI gate once for ' + update.localRef + ' -> ' + update.remoteRef + '\n',
   );
-  return runLocalGate(repoRoot, { npmCommand, spawn, env });
+  const status = runLocalGate(repoRoot, { npmCommand, spawn, env });
+  if (status !== 0) return status;
+
+  const currentHeadAfterGate = runGit(['rev-parse', '--verify', 'HEAD'], repoRoot);
+  if (currentHeadAfterGate !== update.localSha) {
+    throw new PrePushError(
+      'head-mismatch',
+      'current HEAD changed during local CI from ' + update.localSha + ' to ' + currentHeadAfterGate,
+    );
+  }
+  return status;
 }
 
 export function formatFailure(error) {

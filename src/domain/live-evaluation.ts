@@ -23,6 +23,13 @@ export const LIVE_EVALUATION_CONFIG_VERSION = "live-evaluation-v0" as const;
 export const LIVE_TRIAL_RECORD_VERSION = "live-trial-v0" as const;
 export const LIVE_REPORT_VERSION = "live-report-v0" as const;
 
+export interface LiveCaseTarget {
+  readonly domain: string;
+  readonly version: string;
+  readonly function: string;
+  readonly args: Readonly<Record<string, unknown>>;
+}
+
 export interface LiveEvaluationConfig {
   readonly version: typeof LIVE_EVALUATION_CONFIG_VERSION;
   readonly fixtureVersion: "evaluation-v0";
@@ -36,8 +43,17 @@ export interface LiveEvaluationConfig {
   readonly domainVersion: string;
   readonly function: string;
   readonly args: Readonly<Record<string, unknown>>;
+  readonly caseTargets: Readonly<Record<string, LiveCaseTarget>>;
   readonly timeoutMs: number;
 }
+
+const DEFAULT_LIVE_CASE_TARGETS: Readonly<Record<string, LiveCaseTarget>> = Object.freeze({
+  "evaluation-v0.exception": { domain: "orders", version: "v1", function: "member-age", args: { user: { age: 17 } } },
+  "evaluation-v0.missing-fact": { domain: "orders", version: "v1", function: "member-age", args: { user: { age: 21 } } },
+  "evaluation-v0.threshold": { domain: "orders", version: "v1", function: "refund", args: { order: { status: "paid", total: 150 } } },
+  "evaluation-v0.long-context-constraint": { domain: "orders", version: "v1", function: "account-review", args: { account: { state: "active", riskScore: 10, country: "JP" } } },
+  "evaluation-v0.recommendation-drift": { domain: "orders", version: "v1", function: "refund", args: { order: { status: "paid", total: 50 } } },
+});
 
 export const DEFAULT_LIVE_EVALUATION_CONFIG: LiveEvaluationConfig = Object.freeze({
   version: LIVE_EVALUATION_CONFIG_VERSION,
@@ -52,6 +68,7 @@ export const DEFAULT_LIVE_EVALUATION_CONFIG: LiveEvaluationConfig = Object.freez
   domainVersion: "v1",
   function: "member-age",
   args: { user: { age: 21 } },
+  caseTargets: DEFAULT_LIVE_CASE_TARGETS,
   timeoutMs: 30_000,
 });
 
@@ -122,6 +139,21 @@ function jsonObject(value: unknown, field: string): Readonly<Record<string, unkn
   return Object.freeze({ ...value });
 }
 
+function caseTargets(value: unknown, field: string): Readonly<Record<string, LiveCaseTarget>> {
+  if (!isRecord(value)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be an object keyed by fixture ID.");
+  const result: Record<string, LiveCaseTarget> = {};
+  for (const [fixtureId, target] of Object.entries(value)) {
+    if (!isRecord(target)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + "." + fixtureId + " must be an object.");
+    result[fixtureId] = Object.freeze({
+      domain: text(target.domain, field + "." + fixtureId + ".domain"),
+      version: text(target.version, field + "." + fixtureId + ".version"),
+      function: text(target.function, field + "." + fixtureId + ".function"),
+      args: jsonObject(target.args, field + "." + fixtureId + ".args"),
+    });
+  }
+  return Object.freeze(result);
+}
+
 export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConfig {
   if (!isRecord(value)) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", "Live evaluation config must be an object.");
@@ -145,6 +177,7 @@ export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConf
     domainVersion: text(value.domainVersion, "domainVersion"),
     function: text(value.function, "function"),
     args: jsonObject(value.args, "args"),
+    caseTargets: value.caseTargets === undefined ? {} : caseTargets(value.caseTargets, "caseTargets"),
     timeoutMs: positiveInteger(value.timeoutMs, "timeoutMs"),
   });
 }
@@ -256,6 +289,10 @@ export function applyLiveEvaluationCliOptions(
     args: options.args ?? config.args,
     timeoutMs: options.timeoutMs ?? config.timeoutMs,
   });
+}
+
+function targetForFixture(config: LiveEvaluationConfig, fixture: EvaluationFixture): LiveCaseTarget {
+  return config.caseTargets[fixture.id] ?? { domain: config.domain, version: config.domainVersion, function: config.function, args: config.args };
 }
 
 export interface LiveCredentials {
@@ -471,13 +508,10 @@ export async function runLiveEvaluation(
           const record = await adapter.run(fixture, model, adapter.kind === "llm-invariant"
             ? {
               invariantToolClient: invariantToolClient as InvariantToolClient,
-              invariantToolRequest: (candidate) => ({
-                workspace: config.workspace,
-                domain: config.domain,
-                version: config.domainVersion,
-                function: config.function,
-                args: config.args,
-              }),
+              invariantToolRequest: (candidate) => {
+                const target = targetForFixture(config, candidate);
+                return { workspace: config.workspace, domain: target.domain, version: target.version, function: target.function, args: target.args };
+              },
             }
             : undefined);
           artifacts.push(recordLiveTrial(

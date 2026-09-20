@@ -109,6 +109,7 @@ describe("live evaluation configuration and recording", () => {
       domainVersion: "v1",
       function: "member-age",
       args: { user: { age: 21 } },
+      caseTargets: expect.any(Object),
     });
     expect(parseLiveEvaluationArgs(["--trials", "3", "--timeout-ms=5000"])).toMatchObject({
       trialsPerCase: 3,
@@ -158,8 +159,8 @@ describe("live evaluation configuration and recording", () => {
       workspace: "workspace-a",
       domain: "orders",
       version: "v1",
-      function: "member-age",
-      args: { user: { age: 21 } },
+      function: "refund",
+      args: { order: { status: "paid", total: 150 } },
     });
     expect(JSON.stringify(toolClient.requests[0])).not.toContain(fixture.id);
     expect(JSON.stringify(toolClient.requests[0])).not.toContain(fixture.prompt);
@@ -176,6 +177,25 @@ describe("live evaluation configuration and recording", () => {
     const reloaded = deserializeLiveTrial(serializeLiveTrial(artifacts[0]));
     const rescored = rescoreLiveTrial(reloaded, fixture);
     expect(rescored.score).toMatchObject({ label: "correct", passed: true });
+  });
+
+  it("uses a distinct configured real-domain request for every evaluation case", async () => {
+    const config = resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG, { trialsPerCase: 1 });
+    const toolClient = new RecordedInvariantToolClient();
+    await runLiveEvaluation(
+      config,
+      OFFLINE_EVALUATION_FIXTURES,
+      () => new FakeModel(responseFor(OFFLINE_EVALUATION_FIXTURES[0])),
+      () => toolClient,
+    );
+    expect(toolClient.requests).toEqual([
+      { workspace: "workspace-a", domain: "orders", version: "v1", function: "member-age", args: { user: { age: 17 } } },
+      { workspace: "workspace-a", domain: "orders", version: "v1", function: "member-age", args: { user: { age: 21 } } },
+      { workspace: "workspace-a", domain: "orders", version: "v1", function: "refund", args: { order: { status: "paid", total: 150 } } },
+      { workspace: "workspace-a", domain: "orders", version: "v1", function: "account-review", args: { account: { state: "active", riskScore: 10, country: "JP" } } },
+      { workspace: "workspace-a", domain: "orders", version: "v1", function: "refund", args: { order: { status: "paid", total: 50 } } },
+    ]);
+    expect(new Set(toolClient.requests.map((request) => JSON.stringify(request))).size).toBe(5);
   });
 
   it("preserves provider errors and exposes regressions in aggregate and markdown", async () => {
