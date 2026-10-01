@@ -313,6 +313,16 @@ export async function run(mode) {
         && JSON.stringify(actual) === JSON.stringify(repeated);
       report.cases.push({ id: entry.id, passed, expected: entry.expected, actual: observed });
     }
+    for (const [kind, numerator, denominator, expected] of [
+      ['exact_fraction', '1', '3', 'verified'], ['exact_fraction', '33', '100', 'mismatch'],
+    ]) {
+      const args = { request: { version: 'calculation-v1', operation: 'divide', left: '1', right: '3' },
+        claim: { kind, functionId: 'decimal.divide@1', numerator, denominator } };
+      const actual = await mcp(baseUrl, 'calculation.verify', args, context.runId);
+      const repeated = await mcp(baseUrl, 'calculation.verify', args, context.runId);
+      report.cases.push({ id: 'verify-' + numerator + '-' + denominator,
+        passed: actual.status === expected && JSON.stringify(actual) === JSON.stringify(repeated), expected, actual: actual.status });
+    }
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }
   finally {

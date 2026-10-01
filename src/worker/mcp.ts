@@ -1,4 +1,4 @@
-import { calculate, CALCULATION_SOURCE_HASH, CALCULATION_VERSION, CALCULATION_FUNCTIONS, MAX_DECIMAL_DIGITS, MAX_DECIMAL_PLACES } from '../domain/calculation';
+import { calculate, verifyCalculation, CALCULATION_SOURCE_HASH, CALCULATION_VERSION, CALCULATION_FUNCTIONS, MAX_DECIMAL_DIGITS, MAX_DECIMAL_PLACES } from '../domain/calculation';
 import { guardKnowledge } from '../domain/knowledge-guard';
 import { proposeInputSchema, commitInputSchema, proposeDomain, commitDomain, productionAuthoringDependencies, authoringFailure, type AuthoringDependencies } from './domain-authoring';
 import {
@@ -44,6 +44,7 @@ const ALLOWED_ORIGIN_HOSTNAMES = localhostAllowedOrigins();
 export const INVARIANT_USAGE_INSTRUCTIONS = [
   'Invariant evaluates explicitly encoded rules; it is not a general factual-truth oracle.',
   'For arithmetic, use calculation.describe and calculation.evaluate with explicit version and decimal strings. Do not estimate the result yourself. Keep exact fractions separate from rounded display values; the tool does not verify real-world input facts.',
+  'Use calculation.verify to check a structured numeric claim against that same request and functionId. A verified result covers only the numeric claim, not the surrounding prose or whether the chosen function fits the question.',
   'For a domain-backed answer: search authorized domains, distinguish current from historical versions, describe the exact function, then evaluate that same explicit workspace/domain/version with known inputs.',
   'Never invent input facts, substitute a similar function, or treat descriptions and search hits as evaluated evidence. Ask for missing facts or abstain when no applicable domain is established.',
   'Only resolved permits an allow/deny statement, conditional on the supplied facts and the selected version. Cite that version and the returned rule/provenance identifiers. Do not generalize beyond that scope.',
@@ -631,17 +632,30 @@ function createMcpServer(
     maxDecimalDigits: MAX_DECIMAL_DIGITS, maxDecimalPlaces: MAX_DECIMAL_PLACES, functions: CALCULATION_FUNCTIONS,
     scope: 'arithmetic_for_supplied_inputs', notes: ['Use strings for decimal inputs.', 'Unit conversions and real-world fact verification are not performed.'] }) }] }));
   const decimalInput = z.string().max(MAX_DECIMAL_DIGITS + 2);
+  const calculationInput = z.object({ version: z.literal(CALCULATION_VERSION), implementationHash: z.literal(CALCULATION_SOURCE_HASH).optional(),
+    operation: z.enum(['add', 'subtract', 'multiply', 'divide', 'percentage_of', 'percentage_change']),
+    left: decimalInput.optional(), right: decimalInput.optional(), amount: decimalInput.optional(),
+    percent: decimalInput.optional(), from: decimalInput.optional(), to: decimalInput.optional(),
+    decimalPlaces: z.number().int().min(0).max(MAX_DECIMAL_PLACES).optional(),
+  }).strict();
   server.registerTool('calculation.evaluate', {
     description: 'Calculate using exact rational arithmetic. Select calculation-v1. add/subtract/multiply/divide require left and right; percentage_of requires amount and percent; percentage_change requires from and to, with from > 0. Supply only the selected operation parameters, as decimal strings. Optional decimalPlaces uses explicit half-even rounding. A null decimal means the exact fraction repeats, not zero or failure. Do not invent inputs or claim their factual correctness.',
-    inputSchema: z.object({ version: z.literal(CALCULATION_VERSION), implementationHash: z.literal(CALCULATION_SOURCE_HASH).optional(),
-      operation: z.enum(['add', 'subtract', 'multiply', 'divide', 'percentage_of', 'percentage_change']),
-      left: decimalInput.optional(), right: decimalInput.optional(), amount: decimalInput.optional(),
-      percent: decimalInput.optional(), from: decimalInput.optional(), to: decimalInput.optional(),
-      decimalPlaces: z.number().int().min(0).max(MAX_DECIMAL_PLACES).optional(),
-    }).strict(),
+    inputSchema: calculationInput,
     annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   }, async (input) => {
     const result = calculate(input);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], isError: result.status === 'error' };
+  });
+
+  server.registerTool('calculation.verify', {
+    description: 'Recompute a supplied calculation request and compare a structured numeric claim, including its functionId. Exact fractions and rounded decimal displays are different claim types. This checks numeric consistency only, not whether the request matches the user intent, facts, units, or surrounding prose.',
+    inputSchema: z.object({ request: calculationInput, claim: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('exact_fraction'), functionId: z.string().max(100), numerator: z.string().max(1001), denominator: z.string().max(1001) }).strict(),
+      z.object({ kind: z.literal('rounded_decimal'), functionId: z.string().max(100), value: z.string().max(1002), decimalPlaces: z.number().int().min(0).max(MAX_DECIMAL_PLACES) }).strict(),
+    ]) }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  }, async ({ request, claim }) => {
+    const result = verifyCalculation(request, claim);
     return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], isError: result.status === 'error' };
   });
 

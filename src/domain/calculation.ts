@@ -8,9 +8,9 @@ export const MAX_DECIMAL_PLACES = 50;
 type Operation = 'add' | 'subtract' | 'multiply' | 'divide' | 'percentage_of' | 'percentage_change';
 interface Fraction { readonly n: bigint; readonly d: bigint; }
 export interface ExactValue { readonly numerator: string; readonly denominator: string; readonly decimal: string | null; }
-interface FunctionSpec { readonly operation: Operation; readonly parameters: readonly string[]; readonly formula: string; readonly constraint: string; }
+interface FunctionSpec { readonly functionId: string; readonly operation: Operation; readonly parameters: readonly string[]; readonly formula: string; readonly constraint: string; }
 const spec = (operation: Operation, parameters: string[], formula: string, constraint = 'Finite decimal strings; input facts are not independently verified.'): FunctionSpec =>
-  Object.freeze({ operation, parameters: Object.freeze(parameters), formula, constraint });
+  Object.freeze({ functionId: `decimal.${operation}@1`, operation, parameters: Object.freeze(parameters), formula, constraint });
 export const CALCULATION_FUNCTIONS: readonly FunctionSpec[] = Object.freeze([
   spec('add', ['left', 'right'], 'left + right'),
   spec('subtract', ['left', 'right'], 'left - right'),
@@ -23,6 +23,19 @@ class CalculationFailure extends Error {
   constructor(readonly code: string, message: string, readonly path?: string) { super(message); }
 }
 const fail = (code: string, message: string, path?: string): never => { throw new CalculationFailure(code, message, path); };
+function dataFields(input: unknown): Record<string, unknown> {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) return fail('INVALID_INPUT', 'Expected plain data fields.');
+  const fields: Record<string, unknown> = Object.create(null);
+  for (const key of Reflect.ownKeys(input)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key);
+    if (typeof key !== 'string' || !descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+      return fail('INVALID_INPUT', 'Only enumerable data fields are accepted.');
+    }
+    fields[key] = descriptor.value;
+  }
+  return fields;
+}
 const abs = (value: bigint) => value < 0n ? -value : value;
 function fraction(n: bigint, d: bigint): Fraction {
   if (d === 0n) return fail('DIVISION_BY_ZERO', 'Division by zero is undefined.');
@@ -83,17 +96,8 @@ export type CalculationResult = {
 
 export function calculate(input: unknown): CalculationResult {
   try {
-    if (input === null || typeof input !== 'object' || Array.isArray(input)
-      || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) return fail('INVALID_INPUT', 'Expected a plain calculation request.');
     // Snapshot data properties without invoking getters or retaining caller-owned state.
-    const request: Record<string, unknown> = Object.create(null);
-    for (const key of Reflect.ownKeys(input)) {
-      const descriptor = Object.getOwnPropertyDescriptor(input, key);
-      if (typeof key !== 'string' || !descriptor || !('value' in descriptor) || !descriptor.enumerable) {
-        return fail('INVALID_INPUT', 'Only enumerable data fields are accepted.');
-      }
-      request[key] = descriptor.value;
-    }
+    const request = dataFields(input);
     if (request.version !== CALCULATION_VERSION) return fail('UNSUPPORTED_VERSION', 'Select calculation-v1 explicitly.', 'version');
     const definition = CALCULATION_FUNCTIONS.find((item) => item.operation === request.operation);
     if (!definition) return fail('UNSUPPORTED_OPERATION', 'Select a declared calculation function.', 'operation');
@@ -129,7 +133,7 @@ export function calculate(input: unknown): CalculationResult {
         break;
       }
     }
-    return Object.freeze({ status: 'ok', version: CALCULATION_VERSION, implementationHash: CALCULATION_SOURCE_HASH, functionId: `decimal.${definition.operation}@1`,
+    return Object.freeze({ status: 'ok', version: CALCULATION_VERSION, implementationHash: CALCULATION_SOURCE_HASH, functionId: definition.functionId,
       inputs: Object.freeze(inputs), formula: definition.formula, scope: 'arithmetic_for_supplied_inputs',
       result: exact(answer), steps: Object.freeze(steps), ...(places === undefined ? {} : { display: rounded(answer, places) }),
     });
@@ -138,5 +142,42 @@ export function calculate(input: unknown): CalculationResult {
     return Object.freeze({ status: 'error', version: CALCULATION_VERSION, error: Object.freeze({ code: failure.code, message: failure.message,
       ...(failure.path ? { path: failure.path } : {}),
     }) });
+  }
+}
+
+/** Verify only a structured numeric claim, never arbitrary prose or the truth of inputs. */
+export function verifyCalculation(request: unknown, claim: unknown) {
+  const expected = calculate(request);
+  if (expected.status === 'error') return Object.freeze({ status: 'error' as const, expected });
+  try {
+    const fields = dataFields(claim);
+    const required = fields.kind === 'exact_fraction' ? ['kind', 'functionId', 'numerator', 'denominator']
+      : fields.kind === 'rounded_decimal' ? ['kind', 'functionId', 'value', 'decimalPlaces'] : [];
+    if (required.length === 0 || Object.keys(fields).length !== required.length
+      || required.some((key) => !Object.hasOwn(fields, key))) return fail('INVALID_CLAIM', 'Use a complete exact_fraction or rounded_decimal claim.');
+    if (typeof fields.functionId !== 'string' || fields.functionId.length > 100) return fail('INVALID_CLAIM', 'Specify the functionId used for the claim.');
+    let matches: boolean;
+    if (fields.kind === 'exact_fraction') {
+      const integer = (value: unknown): bigint => {
+        if (typeof value !== 'string' || value.length > 1001 || !/^[+-]?\d+$/.test(value)) return fail('INVALID_CLAIM', 'Use bounded integer strings for a fraction.');
+        return BigInt(value);
+      };
+      const asserted = fraction(integer(fields.numerator), integer(fields.denominator));
+      matches = asserted.n.toString() === expected.result.numerator && asserted.d.toString() === expected.result.denominator;
+    } else {
+      if (typeof fields.value !== 'string' || fields.value.length > 1002 || typeof fields.decimalPlaces !== 'number'
+        || !Number.isInteger(fields.decimalPlaces) || fields.decimalPlaces < 0 || fields.decimalPlaces > MAX_DECIMAL_PLACES) {
+        return fail('INVALID_CLAIM', 'Use a bounded rounded decimal string with explicit decimalPlaces.');
+      }
+      if (!expected.display) return fail('MISSING_PRECISION', 'The calculation request must specify decimalPlaces to verify a rounded display.');
+      matches = fields.decimalPlaces === expected.display.decimalPlaces && fields.value === expected.display.value;
+    }
+    matches = matches && fields.functionId === expected.functionId;
+    return Object.freeze({ status: matches ? 'verified' as const : 'mismatch' as const,
+      scope: 'numeric_claim_for_supplied_request' as const, expected,
+      limitations: Object.freeze(['Input facts, function applicability, units, and surrounding prose are not verified.']) });
+  } catch (error) {
+    const failure = error instanceof CalculationFailure ? error : new CalculationFailure('INVALID_CLAIM', 'Claim could not be verified.');
+    return Object.freeze({ status: 'error' as const, error: Object.freeze({ code: failure.code, message: failure.message }) });
   }
 }

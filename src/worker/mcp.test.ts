@@ -1031,3 +1031,14 @@ it('does not turn a zero baseline into a made-up percentage through MCP', async 
   } }), TEST_ENV);
   expect(await readToolResult(response)).toMatchObject({ status: 'error', error: { code: 'INVALID_BASELINE' } });
 });
+
+it('detects a rounded answer incorrectly claimed as exact through MCP', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.verify', params: {
+    name: 'calculation.verify', arguments: {
+      request: { version: 'calculation-v1', operation: 'divide', left: '1', right: '3' },
+      claim: { kind: 'exact_fraction', functionId: 'decimal.divide@1', numerator: '33', denominator: '100' },
+    },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'mismatch', scope: 'numeric_claim_for_supplied_request',
+    expected: { result: { numerator: '1', denominator: '3', decimal: null } } });
+});
