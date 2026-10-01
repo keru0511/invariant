@@ -1,4 +1,5 @@
 import { compareCanonicalText } from './canonical-order';
+import { parseJsonValue } from './decision-context';
 /**
  * Credential-free orchestration, redaction, recording, and reporting for the
  * live v0 evaluation.  The provider is injected so normal CI remains offline.
@@ -8,6 +9,9 @@ import {
   llmInvariantAdapter,
   llmOnlyAdapter,
   rescoreTrial,
+  scoreResponse,
+  EVALUATION_CASE_FAMILIES,
+  EVALUATION_FIXTURE_VERSION,
   type AdapterKind,
   type EvaluationFixture,
   type EvaluationModel,
@@ -564,16 +568,34 @@ export function serializeLiveTrial(artifact: LiveTrialArtifact): string {
 }
 
 export function deserializeLiveTrial(serialized: string): LiveTrialArtifact {
-  const value: unknown = JSON.parse(serialized);
+  const value: unknown = parseJsonValue(JSON.parse(serialized), '$');
+  const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+  const nullableText = (value: unknown) => value === null || typeof value === 'string';
+  const episode = (value: unknown) => ['completed', 'missing', 'timeout'].includes(String(value));
+  const score = isRecord(value) ? value.score : undefined;
+  const error = isRecord(value) ? value.error : undefined;
   if (!isRecord(value) ||
       value.version !== LIVE_TRIAL_RECORD_VERSION ||
-      typeof value.trialId !== "string" ||
-      typeof value.fixtureId !== "string" ||
+      !text(value.trialId) || !text(value.fixtureId) ||
+      value.fixtureVersion !== EVALUATION_FIXTURE_VERSION ||
+      !EVALUATION_CASE_FAMILIES.some((family) => family === value.family) ||
       (value.adapter !== "llm-only" && value.adapter !== "llm-invariant") ||
-      typeof value.trialNumber !== "number" ||
-      typeof value.status !== "string" ||
-      !("score" in value) ||
-      !("error" in value)) {
+      typeof value.trialNumber !== "number" || !Number.isSafeInteger(value.trialNumber) || value.trialNumber < 1 ||
+      (!episode(value.status) && value.status !== 'error') ||
+      value.trialId !== `${LIVE_TRIAL_RECORD_VERSION}:${value.adapter}:${value.fixtureId}:trial-${value.trialNumber}` ||
+      !['response', 'rawOutput', 'invariantToolResponse'].every((key) => Object.hasOwn(value, key)) ||
+      !Array.isArray(value.toolCalls) ||
+      (value.request !== null && (!isRecord(value.request) || value.request.adapter !== value.adapter || typeof value.request.prompt !== 'string')) ||
+      (value.invariantToolRequest !== null && (!isRecord(value.invariantToolRequest)
+        || !['workspace', 'domain', 'version', 'function'].every((key) => text((value.invariantToolRequest as Record<string, unknown>)[key]))
+        || !isRecord(value.invariantToolRequest.args))) ||
+      (score !== null && (!isRecord(score) || !['correct', 'wrong', 'unknown', 'invented', 'invalid'].includes(String(score.label))
+        || ![-1, 0, 1].includes(score.points as number) || typeof score.passed !== 'boolean' || !episode(score.episodeStatus)
+        || typeof score.reason !== 'string' || !nullableText(score.expectedAnswer)
+        || (Object.hasOwn(score, 'observedAnswer') && !nullableText(score.observedAnswer)))) ||
+      (error !== null && (!isRecord(error) || typeof error.name !== 'string' || typeof error.message !== 'string')) ||
+      (value.status === 'error' ? error === null || score !== null || value.response !== null
+        : error !== null || score === null || (isRecord(score) && score.episodeStatus !== value.status))) {
     throw new Error("Invalid live trial artifact.");
   }
   return value as unknown as LiveTrialArtifact;
@@ -593,6 +615,8 @@ export interface LiveConditionSummary {
   readonly failed: number;
   readonly points: number;
   readonly passRate: number | null;
+  readonly overallPassRate: number | null;
+  readonly scoringCoverage: number | null;
   readonly labels: Readonly<Record<ScoreLabel, number>>;
 }
 
@@ -699,6 +723,8 @@ function summarize(adapter: AdapterKind, artifacts: readonly LiveTrialArtifact[]
     failed: scored - passed,
     points,
     passRate: scored === 0 ? null : passed / scored,
+    overallPassRate: artifacts.length === 0 ? null : passed / artifacts.length,
+    scoringCoverage: artifacts.length === 0 ? null : scored / artifacts.length,
     labels: Object.freeze(labels),
   });
 }
@@ -725,7 +751,21 @@ export function aggregateLiveReport(
   fixtures: readonly EvaluationFixture[] = OFFLINE_EVALUATION_FIXTURES,
   generatedAt?: string,
 ): LiveReport {
-  const sorted = [...artifacts].sort((left, right) => compareCanonicalText(left.trialId, right.trialId));
+  const fixtureMap = new Map(fixtures.map((fixture) => [fixture.id, fixture]));
+  if (fixtureMap.size !== fixtures.length) throw new Error('Duplicate benchmark fixture IDs.');
+  const seen = new Set<string>();
+  const checked = artifacts.map((input) => {
+    const artifact = deserializeLiveTrial(serializeLiveTrial(input));
+    const fixture = fixtureMap.get(artifact.fixtureId);
+    if (!fixture || fixture.version !== artifact.fixtureVersion || fixture.family !== artifact.family) throw new Error('Trial is outside the declared benchmark.');
+    if (seen.has(artifact.trialId)) throw new Error('Duplicate live trial.');
+    seen.add(artifact.trialId);
+    if (artifact.status === 'error') return artifact;
+    // Persisted score claims are untrusted; the supplied benchmark remains the oracle.
+    const score = scoreResponse(fixture, artifact.response);
+    return Object.freeze({ ...artifact, score, status: score.episodeStatus });
+  });
+  const sorted = checked.sort((left, right) => compareCanonicalText(left.trialId, right.trialId));
   const errors = sorted.filter((item) => item.error !== null).map((item) => ({
     trialId: item.trialId,
     adapter: item.adapter,
@@ -825,12 +865,12 @@ export function renderLiveReportMarkdown(report: LiveReport): string {
     "",
     "## Aggregate",
     "",
-    "| Condition | Trials | Scored | Passed | Errors | Points | Pass rate |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Condition | Trials | Scored | Passed | Errors | Points | Pass/scored | Pass/all trials | Scored/all trials |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const adapter of ["llm-only", "llm-invariant"] as const) {
     const summary = report.conditions[adapter];
-    lines.push("| " + conditionName(adapter) + " | " + summary.total + " | " + summary.scored + " | " + summary.passed + " | " + summary.errors + " | " + summary.points + " | " + percentage(summary.passRate) + " |");
+    lines.push("| " + conditionName(adapter) + " | " + summary.total + " | " + summary.scored + " | " + summary.passed + " | " + summary.errors + " | " + summary.points + " | " + percentage(summary.passRate) + " | " + percentage(summary.overallPassRate) + " | " + percentage(summary.scoringCoverage) + " |");
   }
   lines.push("", "## Per-case", "", "| Case | LLM-only | LLM+Invariant |", "| --- | --- | --- |");
   for (const entry of report.cases) {

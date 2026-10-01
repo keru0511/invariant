@@ -240,3 +240,9 @@ describe('offline evaluation fixtures and scoring', () => {
     }
   });
 });
+
+it('does not mark a response with unscored extra claims as correct', () => {
+  const fixture = fixtureById('evaluation-v0.threshold');
+  expect(scoreResponse(fixture, { ...responseFor(fixture), explanation: 'An unsupported extra factual claim.' })).toMatchObject({ label: 'invalid', passed: false });
+  expect(scoreResponse(fixture, { status: 'missing', hiddenAnswer: 'allow' })).toMatchObject({ label: 'invalid', passed: false });
+});

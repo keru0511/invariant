@@ -274,6 +274,8 @@ function invalidResponseReason(value: unknown): string | null {
   if (value.status !== 'completed' && value.status !== 'missing' && value.status !== 'timeout') {
     return 'Response status must be completed, missing, or timeout.';
   }
+  const allowed = value.status === 'completed' ? ['status', 'answer', 'facts', 'constraints'] : ['status', 'reason'];
+  if (Object.keys(value).some((key) => !allowed.includes(key))) return 'Response contains fields outside the scored contract.';
   if (value.status === 'completed') {
     if (!hasOwn(value, 'answer') || (value.answer !== null && !nonEmptyString(value.answer))) {
       return 'A completed response must contain a string answer or null.';

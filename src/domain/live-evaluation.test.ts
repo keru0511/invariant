@@ -243,3 +243,55 @@ describe("live evaluation configuration and recording", () => {
     expect(report.errors).toHaveLength(2);
   });
 });
+
+describe('live report input integrity', () => {
+  const fixture = fixtureById('evaluation-v0.threshold');
+  async function artifact() {
+    const record = await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture, 'allow') });
+    return recordLiveTrial('llm-only', fixture, 1, record);
+  }
+  it('recomputes a saved score rather than trusting a claimed success', async () => {
+    const saved = await artifact();
+    const forged = { ...saved, score: { ...saved.score!, label: 'correct' as const, points: 1 as const, passed: true } };
+    const report = aggregateLiveReport([forged], [fixture]);
+    expect(report.conditions['llm-only'].passed).toBe(0);
+    expect(report.conditions['llm-only'].labels.wrong).toBe(1);
+  });
+  it('rejects duplicate trials rather than counting the same result twice', async () => {
+    const saved = await artifact();
+    expect(() => aggregateLiveReport([saved, saved], [fixture])).toThrow();
+  });
+  it('rejects trials for fixtures outside the declared benchmark', async () => {
+    const saved = await artifact();
+    expect(() => aggregateLiveReport([saved], [])).toThrow();
+  });
+  it('keeps errors in the overall denominator even when every scored response passes', async () => {
+    const record = await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture) });
+    const report = aggregateLiveReport([
+      recordLiveTrial('llm-only', fixture, 1, record),
+      recordLiveError('llm-only', fixture, 2, new Error('Synthetic failure')),
+    ], [fixture]);
+    expect(report.conditions['llm-only']).toMatchObject({ passRate: 1, overallPassRate: 0.5, scoringCoverage: 0.5, errors: 1 });
+    expect(renderLiveReportMarkdown(report)).toContain('Pass/all trials');
+  });
+});
+
+describe('saved live artifact validation', () => {
+  const fixture = OFFLINE_EVALUATION_FIXTURES[0];
+  const valid = recordLiveError('llm-only', fixture, 1, new Error('Synthetic failure'));
+  it.each([
+    { trialNumber: -1 }, { trialNumber: 1.5 }, { trialNumber: 9007199254740992 },
+    { status: 'success' }, { family: 'unregistered' }, { fixtureVersion: 'future-version' },
+    { toolCalls: {} }, { error: null }, { request: { adapter: 'llm-invariant', prompt: 'wrong condition' } },
+  ])('rejects malformed identity, state, or capture fields: %j', (change) => {
+    expect(() => deserializeLiveTrial(JSON.stringify({ ...valid, ...change }))).toThrow();
+  });
+  it('returns an immutable record so saved evidence cannot drift after validation', () => {
+    const result = deserializeLiveTrial(serializeLiveTrial(valid));
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.error)).toBe(true);
+  });
+  it('rejects duplicate benchmark definitions', () => {
+    expect(() => aggregateLiveReport([valid], [fixture, fixture])).toThrow();
+  });
+});
