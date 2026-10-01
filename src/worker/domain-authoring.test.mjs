@@ -103,7 +103,11 @@ describe('reviewed domain authoring', () => {
     const committed = (await call('domain.commit', confirmation(proposed), s)).value;
     expect(committed.status).toBe('committed');
     const evaluated = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version, function: 'member-age', args: { user: { age: 20 } } }, s)).value;
-    expect(evaluated.decision).toBe('deny');
+    expect(evaluated.status).toBe('unresolved');
+    expect(evaluated.decision).toBeUndefined();
+    expect(evaluated.value).toBeNull();
+    expect(evaluated.errors[0].code).toBe('DOMAIN_KNOWLEDGE_INCOMPLETE');
+    expect(evaluated.knowledgeIssues.unknowns[0].id).toBe('unknown.country');
     expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd' })).toBe(committed.version);
   });
 
@@ -254,5 +258,57 @@ describe('reviewed domain authoring', () => {
     const response = await handleMcpRequest(request('domain.propose', input), {}, { authoring: s.dependencies });
     expect(response.status).toBe(401);
     expect(s.provider.generate).not.toHaveBeenCalled();
+  });
+});
+
+describe('published knowledge cannot silently become certainty', () => {
+  it('blocks a conflict even when executable rules agree', async () => {
+    const s = await setup(async (req) => {
+      const generated = output(req);
+      generated.patch.operations[1] = { op: 'add_conflict', conflict: {
+        id: 'conflict.age', kind: 'conflict', subject: 'adult threshold', alternatives: ['18', '21'],
+      } };
+      return generated;
+    });
+    const proposed = await proposeDomain(input, principal, s.dependencies);
+    const committed = await commitDomain(confirmation(proposed), principal, s.dependencies);
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version,
+      function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('conflict');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
+    expect(result.knowledgeIssues.conflicts[0].alternatives).toEqual(['18', '21']);
+  });
+
+  it('resumes evaluation only in a new version after explicit unknown resolution', async () => {
+    const s = await setup(async (req) => {
+      if (req.currentDomainVersion === 'v1') return output(req);
+      return { patch: { contractVersion: 'domain-patch-v0', kind: 'domain-patch', baseVersion: req.currentDomainVersion,
+        provenance: { source: 'conversation', reference: req.conversation[0].id },
+        operations: [{ op: 'resolve_unknown', unknownId: 'unknown.country', resolution: 'JP' }],
+      }, operationEvidence: [{ operationIndex: 0, sourceReferences: [req.conversation[0].id] }] };
+    });
+    const first = await proposeDomain(input, principal, s.dependencies);
+    const one = await commitDomain(confirmation(first), principal, s.dependencies);
+    const next = await proposeDomain({ ...input, baseVersion: one.version,
+      conversation: [{ id: 't2', role: 'user', content: 'Country is JP.' }] }, principal, s.dependencies);
+    const two = await commitDomain(confirmation(next), principal, s.dependencies);
+    const args = { workspace: 'w', domain: 'd', function: 'member-age', args: { user: { age: 20 } } };
+    expect((await call('domain.evaluate', { ...args, version: one.version }, s)).value.status).toBe('unresolved');
+    expect((await call('domain.evaluate', { ...args, version: two.version }, s)).value.decision).toBe('deny');
+    expect((await call('domain.evaluate', { ...args, version: 'v1' }, s)).value.decision).toBe('allow');
+  });
+
+  it.each(['null', '{}', '{"unknowns":[]}', 'not-json'])('fails closed on damaged authoring metadata %s', async (damaged) => {
+    const s = await setup();
+    const proposal = await proposeDomain(input, principal, s.dependencies);
+    const committed = await commitDomain(confirmation(proposal), principal, s.dependencies);
+    s.sqlite.prepare('UPDATE domain_proposals SET authoring_json = ?').run(damaged);
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version,
+      function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('error');
+    expect(result.errors[0].code).toBe('STORAGE_FAILURE');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
   });
 });

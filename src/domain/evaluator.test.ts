@@ -154,3 +154,19 @@ describe('pure Domain evaluator', () => {
     expect(JSON.stringify(args)).toBe(beforeArgs);
   });
 });
+
+describe('adversarial numeric facts', () => {
+  it.each([Infinity, -Infinity, NaN])('refuses non-finite input %s instead of making a decision', (age) => {
+    const actual = evaluate(functionCatalog, 'member-age', { user: { age } });
+    expect(actual.status).toBe('error');
+    expect(actual.value).toBeNull();
+    expect(actual.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'INVALID_ARGS', path: 'user.age' }),
+    ]));
+  });
+
+  it('refuses valid JSON numeric overflow instead of allowing an infinite age', () => {
+    const args: unknown = JSON.parse('{"user":{"age":1e999}}');
+    expect(evaluate(functionCatalog, 'member-age', args).status).toBe('error');
+  });
+});

@@ -508,6 +508,16 @@ function finalValidate(candidate: DomainPatchModel): DomainPatchResult<DomainPat
   return success(deepFreeze({ ...candidate, domain: parsedDomain.value }));
 }
 
+/** Validate a persisted authoring snapshot without applying or inventing edits. */
+export function parseDomainModel(value: unknown): DomainPatchResult<DomainPatchModel> {
+  if (!isRecord(value) || value.kind !== DOMAIN_MODEL_KIND || value.contractVersion !== DOMAIN_CONTRACT_VERSION
+    || !['types', 'examples', 'unknowns', 'conflicts'].every((key) => Array.isArray(value[key]))) {
+    return failure(patchError('INVALID_FINAL_MODEL', '$', 'Expected a complete versioned Domain model.'));
+  }
+  const normalized = normalizeBase(value);
+  return isFailure(normalized) ? normalized : finalValidate(normalized.value);
+}
+
 /** Apply a validated patch atomically. The input model is never mutated. */
 export function applyDomainPatch(base: unknown, patch: unknown): DomainPatchResult<DomainPatchModel> {
   const parsedPatch = parseDomainPatch(patch);

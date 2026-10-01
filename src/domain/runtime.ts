@@ -43,7 +43,10 @@ export interface DomainCatalog {
 
 export type Domain = DomainCatalog;
 
+export const MAX_DOMAIN_EXPRESSION_DEPTH = 128 as const;
+
 export const DOMAIN_PARSE_ERROR_CODES = [
+  'RECURSION_LIMIT',
   'INVALID_SHAPE',
   'MISSING_FIELD',
   'INVALID_DISCRIMINATOR',
@@ -112,6 +115,7 @@ interface ParseContext {
 interface InternalParser {
   readonly context: ParseContext;
   readonly activeObjects: WeakSet<object>;
+  depth: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -519,12 +523,16 @@ function parseExpressionValue(
   path: string,
   parser: InternalParser,
 ): DomainParseResult<ParsedExpression> {
+  if (parser.depth > MAX_DOMAIN_EXPRESSION_DEPTH) {
+    return failure(makeError('RECURSION_LIMIT', path, 'Expression nesting exceeds the evaluation limit.'));
+  }
   const record = readRecord(value, path);
   if (isFailure(record)) return record;
   if (parser.activeObjects.has(record.value)) {
     return failure(makeError('CIRCULAR_REFERENCE', path, "Circular expression reference at '" + path + "'."));
   }
   parser.activeObjects.add(record.value);
+  parser.depth += 1;
   try {
     const kindValue = readString(record.value, 'kind', path);
     if (isFailure(kindValue)) return kindValue;
@@ -722,6 +730,7 @@ function parseExpressionValue(
     return success({ node, type: 'boolean' });
   } finally {
     parser.activeObjects.delete(record.value);
+    parser.depth -= 1;
   }
 }
 
@@ -729,6 +738,7 @@ export function parseExpression(value: unknown): DomainParseResult<DomainExpress
   const parser: InternalParser = {
     context: { identifiers: new Set<string>() },
     activeObjects: new WeakSet<object>(),
+    depth: 0,
   };
   const parsed = parseExpressionValue(value, '$', parser);
   if (isFailure(parsed)) return parsed;
@@ -920,6 +930,7 @@ function parseFunctionValue(
   const parser: InternalParser = {
     context,
     activeObjects: new WeakSet<object>(),
+    depth: 0,
   };
   const policy = parsePolicy(record.value.policy, childPath(path, 'policy'), parser);
   if (isFailure(policy)) return policy;

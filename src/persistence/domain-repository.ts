@@ -1,4 +1,7 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
+import { parseDomainModel, type DomainUnknown, type DomainConflict } from '../domain/patch';
+import { stableJsonStringify } from '../domain/decision-context';
+import type { JsonValue } from '../domain/decision-context';
 import {
   parseDomain,
   type DomainCatalog,
@@ -42,6 +45,10 @@ export interface DomainVersionRecord {
   readonly versionId: string;
   readonly model: DomainCatalog;
   readonly publishedAt: string;
+  readonly knowledgeIssues?: {
+    readonly unknowns: readonly DomainUnknown[];
+    readonly conflicts: readonly DomainConflict[];
+  };
 }
 
 export interface DomainSearchCandidate {
@@ -98,6 +105,8 @@ interface StoredVersionRow {
   readonly version_id: string;
   readonly model_json: string;
   readonly published_at: string;
+  readonly proposal_id?: string | null;
+  readonly authoring_json?: string | null;
 }
 
 interface StoredSearchRow extends StoredVersionRow {
@@ -117,9 +126,12 @@ const INSERT_DOMAIN = `
 `;
 
 const SELECT_VERSION = `
-  SELECT workspace_id, domain_id, version_id, model_json, published_at
-  FROM domain_versions
-  WHERE workspace_id = ? AND domain_id = ? AND version_id = ?
+  SELECT v.workspace_id, v.domain_id, v.version_id, v.model_json, v.published_at,
+    v.proposal_id, p.authoring_json
+  FROM domain_versions v
+  LEFT JOIN domain_proposals p ON p.workspace_id = v.workspace_id
+    AND p.domain_id = v.domain_id AND p.version_id = v.version_id AND p.proposal_id = v.proposal_id
+  WHERE v.workspace_id = ? AND v.domain_id = ? AND v.version_id = ?
 `;
 
 const SELECT_SEARCH_VERSIONS = `
@@ -217,12 +229,25 @@ function canonicalVersion(row: StoredVersionRow): DomainVersionRecord {
       parsed.errors,
     );
   }
+  let knowledgeIssues: DomainVersionRecord['knowledgeIssues'];
+  if (row.proposal_id != null) {
+    let authoring: unknown;
+    try { authoring = JSON.parse(row.authoring_json ?? 'null'); }
+    catch { throw new DomainRepositoryError('CORRUPT_VERSION', 'Stored authoring metadata is invalid.'); }
+    const model = parseDomainModel(authoring);
+    if (!model.ok || model.value.version !== row.version_id
+      || stableJsonStringify(model.value.domain as unknown as JsonValue) !== stableJsonStringify(parsed.value as unknown as JsonValue)) {
+      throw new DomainRepositoryError('CORRUPT_VERSION', 'Stored authoring metadata does not match its published version.');
+    }
+    knowledgeIssues = Object.freeze({ unknowns: model.value.unknowns, conflicts: model.value.conflicts });
+  }
   return Object.freeze({
     workspaceId: row.workspace_id,
     domainId: row.domain_id,
     versionId: row.version_id,
     model: parsed.value,
     publishedAt: row.published_at,
+    ...(knowledgeIssues === undefined ? {} : { knowledgeIssues }),
   });
 }
 

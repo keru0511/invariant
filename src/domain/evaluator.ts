@@ -21,11 +21,12 @@ import {
   type DomainRule,
   type DomainTraceEvent,
 } from './contract';
-import { parseDomain, type Domain } from './runtime';
+import { parseDomain, MAX_DOMAIN_EXPRESSION_DEPTH, type Domain } from './runtime';
 
-export const MAX_EVALUATION_DEPTH = 128 as const;
+export const MAX_EVALUATION_DEPTH = MAX_DOMAIN_EXPRESSION_DEPTH;
 
 export const EVALUATION_ERROR_CODES = [
+  'DOMAIN_KNOWLEDGE_INCOMPLETE',
   'INVALID_DOMAIN',
   'INVALID_FUNCTION',
   'INVALID_ARGS',
@@ -196,6 +197,10 @@ function argumentErrors(domainFunction: DomainFunction, args: unknown): Argument
       return;
     }
     if (value === null || typeof value !== 'object') {
+      if (typeof value === 'number' && !Number.isFinite(value)) {
+        errors.push(error('INVALID_ARGS', "Input at '" + path + "' must be a finite JSON number.", { path }));
+        return;
+      }
       const declaration = declared.get(path);
       if (!declaration) {
         errors.push(error('INVALID_ARGS', "Unknown argument path '" + path + "'.", { path }));
@@ -617,7 +622,7 @@ function evaluateFunction(context: EvaluationContext): EvaluationResult {
 
 function invalidDomainResult(parsed: ReturnType<typeof parseDomain>): EvaluationResult {
   if (parsed.ok) return result('error');
-  const code: EvaluationErrorCode = parsed.error.code === 'CIRCULAR_REFERENCE' ? 'CYCLE_DETECTED' : 'INVALID_DOMAIN';
+  const code: EvaluationErrorCode = parsed.error.code === 'CIRCULAR_REFERENCE' ? 'CYCLE_DETECTED' : parsed.error.code === 'RECURSION_LIMIT' ? 'RECURSION_LIMIT' : 'INVALID_DOMAIN';
   return result('error', undefined, {
     errors: [error(code, parsed.error.message, { path: parsed.error.path })],
   });

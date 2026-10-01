@@ -991,3 +991,20 @@ describe('MCP ハンドラー (/mcp)', () => {
     expect(repository.calls).toEqual([{ operation: 'authorize', workspaceId: 'workspace-b' }]);
   });
 });
+
+describe('MCP numeric overflow boundary', () => {
+  it('rejects a JSON exponent overflow over the actual MCP parser', async () => {
+    const template = createModernRequest({ method: 'tools/call', name: 'domain.evaluate', params: {
+      name: 'domain.evaluate', arguments: { workspace: 'workspace-a', domain: 'orders', version: 'v1', function: 'member-age', args: { user: { age: 12345 } } },
+    } });
+    const wire = (await template.text()).replace('12345', '1e999');
+    const response = await handleMcpRequest(new Request(template.url, { method: 'POST', headers: template.headers, body: wire }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL }, workspaceRepository: createFakeWorkspaceRepository(),
+    });
+    const result = await readToolResult(response);
+    expect(result.status).toBe('error');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
+    expect(result.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'INVALID_ARGS' })]));
+  });
+});

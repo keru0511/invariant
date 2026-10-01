@@ -1,3 +1,4 @@
+import { guardKnowledge } from '../domain/knowledge-guard';
 import { proposeInputSchema, commitInputSchema, proposeDomain, commitDomain, productionAuthoringDependencies, authoringFailure, type AuthoringDependencies } from './domain-authoring';
 import {
   McpServer,
@@ -136,6 +137,7 @@ export interface DomainEvaluateResult {
   readonly errors: readonly DomainEvaluateError[];
   readonly trace: readonly unknown[];
   readonly provenance: DomainProvenance;
+  readonly knowledgeIssues?: DomainVersionRecord['knowledgeIssues'];
 }
 
 export interface DomainFunctionSchema {
@@ -561,7 +563,10 @@ async function evaluateStoredDomain(
     ) {
       return errorResult(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
     }
-    return evaluationResult(input, evaluate(record.model, input.function, input.args));
+    const evaluated = evaluationResult(input, guardKnowledge(
+      evaluate(record.model, input.function, input.args), record.knowledgeIssues,
+    ));
+    return { ...evaluated, ...(record.knowledgeIssues ? { knowledgeIssues: record.knowledgeIssues } : {}) };
   } catch (error) {
     if (error instanceof WorkspaceAccessError) {
       return errorResult(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
@@ -620,7 +625,7 @@ function createMcpServer(
   server.registerTool(
     'domain.evaluate',
     {
-      description: 'Evaluate an explicitly selected authorized stored domain version.',
+      description: 'Evaluate an explicitly selected stored domain version using supplied facts. Only resolved permits reporting allow/deny, conditional on those facts and that version. For unresolved/conflict/ambiguous/error, abstain and explain the missing facts or blockers. Never invent inputs. This checks encoded rules, not factual truth or arbitrary prose.',
       inputSchema: domainEvaluateInputSchema,
     },
     async (input: DomainEvaluateInput) => {
@@ -660,7 +665,7 @@ function createMcpServer(
   server.registerTool(
     'domain.validate',
     {
-      description: 'Validate an explicitly selected authorized stored domain version.',
+      description: 'Validate the structure of a stored domain version. Valid does not establish factual truth, completeness, or absence of unresolved knowledge.',
       inputSchema: domainValidateInputSchema,
     },
     async (input: DomainValidateInput) => {
@@ -821,4 +826,3 @@ export async function handleMcpRequest(
     headers,
   });
 }
-
