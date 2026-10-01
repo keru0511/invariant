@@ -140,6 +140,15 @@ describe('live model completion integrity', () => {
     await expect(client.complete({ ...request, prompt: 'Second request' })).rejects.toThrow();
     expect(client.takeLastCall()?.request).toMatchObject({ prompt: 'Second request' });
   });
+  it('records the prompt actually sent even if the caller changes its object during fetch', async () => {
+    const mutable = { ...request, prompt: 'Original prompt' };
+    const client = new OpenAICompatibleModel(config, 'synthetic-key', async () => {
+      mutable.prompt = 'Changed after send';
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }));
+    });
+    await client.complete(mutable);
+    expect(client.takeLastCall()?.request.prompt).toBe('Original prompt');
+  });
 });
 
 describe('live MCP response integrity', () => {
@@ -175,5 +184,14 @@ describe('live MCP response integrity', () => {
       },
     ));
     await expect(client.evaluate(request)).resolves.toMatchObject({ status: 'resolved', decision: 'allow' });
+  });
+  it('records the arguments actually sent rather than a subsequently edited caller object', async () => {
+    const mutable = structuredClone(request);
+    const client = new HttpInvariantToolClient(config, 'synthetic-token', async () => {
+      mutable.args.user.age = 99;
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { content } }));
+    });
+    await client.evaluate(mutable);
+    expect(client.takeLastCall()?.request.args).toEqual({ user: { age: 20 } });
   });
 });

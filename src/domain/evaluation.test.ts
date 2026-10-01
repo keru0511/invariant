@@ -246,3 +246,45 @@ it('does not mark a response with unscored extra claims as correct', () => {
   expect(scoreResponse(fixture, { ...responseFor(fixture), explanation: 'An unsupported extra factual claim.' })).toMatchObject({ label: 'invalid', passed: false });
   expect(scoreResponse(fixture, { status: 'missing', hiddenAnswer: 'allow' })).toMatchObject({ label: 'invalid', passed: false });
 });
+
+describe('evaluation snapshot boundaries', () => {
+  it('keeps the original expected answer when the caller changes the fixture during completion', async () => {
+    const fixture = structuredClone(fixtureById('evaluation-v0.threshold'));
+    const response = responseFor(fixture, 'allow');
+    const record = await llmOnlyAdapter.run(fixture, { complete: async () => {
+      (fixture.expected as { answer: string | null }).answer = 'allow';
+      return response;
+    } });
+    expect(record.score).toMatchObject({ label: 'wrong', expectedAnswer: 'deny' });
+    expect(Object.isFrozen(fixture)).toBe(false);
+  });
+  it('isolates tool requests, tool results, model requests, and recorded results', async () => {
+    const fixture = fixtureById('evaluation-v0.threshold');
+    const originalRequest = { workspace: 'w', domain: 'd', version: 'v1', function: 'refund', args: { order: { total: 150 } } };
+    const originalResult = { status: 'resolved', decision: 'deny' };
+    const record = await llmInvariantAdapter.run(fixture, { complete: async (request) => {
+      originalResult.decision = 'allow';
+      expect(request.invariantContext).toMatchObject({ request: { args: { order: { total: 150 } } }, response: { decision: 'deny' } });
+      expect(Object.isFrozen(request)).toBe(true);
+      expect(Object.isFrozen(request.invariantContext)).toBe(true);
+      return responseFor(fixture);
+    } }, { invariantToolRequest: () => originalRequest, invariantToolClient: { evaluate: async (request) => {
+      originalRequest.args.order.total = 50;
+      expect(Object.isFrozen(request)).toBe(true);
+      return originalResult;
+    } } });
+    expect(Object.isFrozen(record.score)).toBe(true);
+    expect(Object.isFrozen(record.response)).toBe(true);
+    expect(Object.isFrozen(originalRequest)).toBe(false);
+  });
+});
+
+it('scores the same immutable response snapshot that is recorded', async () => {
+  const fixture = fixtureById('evaluation-v0.threshold');
+  let reads = 0;
+  const output = { ...responseFor(fixture), get answer() { return reads++ === 0 ? 'deny' : 'allow'; } };
+  const record = await llmOnlyAdapter.run(fixture, { complete: async () => output });
+  expect(reads).toBe(1);
+  expect(record.response).toMatchObject({ answer: 'deny' });
+  expect(record.score).toMatchObject({ label: 'correct', observedAnswer: 'deny' });
+});

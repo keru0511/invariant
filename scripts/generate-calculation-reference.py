@@ -48,6 +48,21 @@ for operation in ['add','subtract','multiply','divide','percentage_of','percenta
         elif operation == 'percentage_change': fields = {'from': number(True), 'to': number()}
         else: fields = {'left': number(), 'right': number(True)}
         add_case(operation, fields, rng.randint(0, 8))
+# Append boundary cases without changing any of the existing locked reference cases.
+big = '9' * 200
+tiny = '0.' + '0' * 198 + '1'
+add_case('add', {'left': big, 'right': '1'}, 0)
+add_case('subtract', {'left': '-' + big, 'right': big}, 0)
+add_case('multiply', {'left': big, 'right': big}, 50)
+add_case('divide', {'left': big, 'right': '9' * 199 + '8'}, 50)
+add_case('divide', {'left': '1', 'right': tiny}, 50)
+add_case('multiply', {'left': tiny, 'right': tiny}, 50)
+add_case('percentage_of', {'amount': big, 'percent': '99.99'}, 50)
+add_case('percentage_change', {'from': tiny, 'to': big}, 50)
+add_case('add', {'left': '+.5', 'right': '-0'}, 50)
+add_case('add', {'left': '0.' + '0' * 49 + '25', 'right': '0'}, 50)
+add_case('add', {'left': '0.' + '0' * 49 + '35', 'right': '0'}, 50)
+add_case('divide', {'left': '-' + tiny, 'right': '3'}, 50)
 output = {'version': 'calculation-reference-v1', 'oracle': 'Python fractions.Fraction + decimal.Decimal (ROUND_HALF_EVEN)', 'seed': 20261002, 'cases': cases}
 path = Path(__file__).resolve().parents[1] / 'fixtures/calculation-v1/reference.json'
 header = {key: value for key, value in output.items() if key != 'cases'}

@@ -10,6 +10,7 @@ import {
   llmOnlyAdapter,
   rescoreTrial,
   scoreResponse,
+  snapshotEvaluationFixture,
   EVALUATION_CASE_FAMILIES,
   EVALUATION_FIXTURE_VERSION,
   type AdapterKind,
@@ -117,7 +118,7 @@ function text(value: unknown, field: string): string {
 }
 
 function positiveInteger(value: unknown, field: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be a positive integer.");
   }
   return value;
@@ -141,12 +142,13 @@ function jsonObject(value: unknown, field: string): Readonly<Record<string, unkn
   if (!isRecord(value)) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be a JSON object.");
   }
-  return Object.freeze({ ...value });
+  try { return parseJsonValue(value, field) as Readonly<Record<string, unknown>>; }
+  catch { throw new LiveEvaluationConfigError('INVALID_CONFIG', field + ' must contain finite, acyclic JSON data.'); }
 }
 
 function caseTargets(value: unknown, field: string): Readonly<Record<string, LiveCaseTarget>> {
   if (!isRecord(value)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be an object keyed by fixture ID.");
-  const result: Record<string, LiveCaseTarget> = {};
+  const result: Record<string, LiveCaseTarget> = Object.create(null);
   for (const [fixtureId, target] of Object.entries(value)) {
     if (!isRecord(target)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + "." + fixtureId + " must be an object.");
     result[fixtureId] = Object.freeze({
@@ -182,7 +184,7 @@ export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConf
     domainVersion: text(value.domainVersion, "domainVersion"),
     function: text(value.function, "function"),
     args: jsonObject(value.args, "args"),
-    caseTargets: value.caseTargets === undefined ? {} : caseTargets(value.caseTargets, "caseTargets"),
+    caseTargets: value.caseTargets === undefined ? Object.freeze(Object.create(null)) : caseTargets(value.caseTargets, "caseTargets"),
     timeoutMs: positiveInteger(value.timeoutMs, "timeoutMs"),
   });
 }
@@ -297,7 +299,8 @@ export function applyLiveEvaluationCliOptions(
 }
 
 function targetForFixture(config: LiveEvaluationConfig, fixture: EvaluationFixture): LiveCaseTarget {
-  return config.caseTargets[fixture.id] ?? { domain: config.domain, version: config.domainVersion, function: config.function, args: config.args };
+  return Object.hasOwn(config.caseTargets, fixture.id) ? config.caseTargets[fixture.id]
+    : { domain: config.domain, version: config.domainVersion, function: config.function, args: config.args };
 }
 
 export interface LiveCredentials {
@@ -331,7 +334,7 @@ export function redactForRecording(value: unknown): unknown {
   if (typeof value === "string") return redactText(value);
   if (Array.isArray(value)) return value.map(redactForRecording);
   if (isRecord(value)) {
-    const output: Record<string, unknown> = {};
+    const output: Record<string, unknown> = Object.create(null);
     for (const [key, nested] of Object.entries(value)) {
       output[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : redactForRecording(nested);
     }
@@ -490,6 +493,10 @@ export async function runLiveEvaluation(
   createModel: (adapter: AdapterKind, invariantToolClient?: InvariantToolClient) => EvaluationModel | Promise<EvaluationModel>,
   createInvariantToolClient: () => InvariantToolClient | Promise<InvariantToolClient>,
 ): Promise<readonly LiveTrialArtifact[]> {
+  config = validateLiveEvaluationConfig(config);
+  if (!Array.isArray(fixtures)) throw new Error('Expected an array of evaluation fixtures.');
+  fixtures = Object.freeze(fixtures.map(snapshotEvaluationFixture));
+  if (new Set(fixtures.map((fixture) => fixture.id)).size !== fixtures.length) throw new Error('Duplicate benchmark fixture IDs.');
   const artifacts: LiveTrialArtifact[] = [];
   for (const adapter of [llmOnlyAdapter, llmInvariantAdapter]) {
     let model: EvaluationModel | undefined;

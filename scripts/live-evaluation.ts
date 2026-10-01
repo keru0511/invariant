@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { parseJsonValue } from '../src/domain/decision-context';
 import {
   aggregateLiveReport,
   applyLiveEvaluationCliOptions,
@@ -113,6 +114,7 @@ export class HttpInvariantToolClient implements InvariantToolClient {
 
   async evaluate(request: DomainEvaluateRequest): Promise<unknown> {
     this.capture = null;
+    request = parseJsonValue(request, '$.toolRequest') as unknown as DomainEvaluateRequest;
     const body = {
       jsonrpc: "2.0",
       id: ++this.requestId,
@@ -181,6 +183,9 @@ export class OpenAICompatibleModel implements CapturingEvaluationModel {
 
   async complete(request: ModelRequest): Promise<unknown> {
     this.capture = null;
+    request = parseJsonValue({ fixture: request.fixture, adapter: request.adapter, prompt: request.prompt,
+      ...(request.invariantContext === undefined ? {} : { invariantContext: request.invariantContext }),
+    }, '$.modelRequest') as unknown as ModelRequest;
     const context = request.invariantContext === undefined
       ? "No additional invariant context is available."
       : "Authorized Invariant tool result from domain.evaluate. Request and response: " +

@@ -295,3 +295,43 @@ describe('saved live artifact validation', () => {
     expect(() => aggregateLiveReport([valid], [fixture, fixture])).toThrow();
   });
 });
+
+it('snapshots the run plan and fixtures before asynchronous model setup', async () => {
+  const fixture = structuredClone(fixtureById('evaluation-v0.threshold'));
+  const fixtures = [fixture];
+  const response = responseFor(fixture);
+  const config = structuredClone(resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG, { trialsPerCase: 1 }));
+  const artifacts = await runLiveEvaluation(config, fixtures, async () => {
+    fixtures.length = 0;
+    (fixture.expected as { answer: string | null }).answer = 'allow';
+    (config as { trialsPerCase: number }).trialsPerCase = 2;
+    return new FakeModel(response);
+  }, () => new RecordedInvariantToolClient());
+  expect(artifacts).toHaveLength(2);
+  expect(artifacts.every((entry) => entry.score?.label === 'correct')).toBe(true);
+});
+
+it('retains special JSON keys when redacting recorded evidence', () => {
+  const input = JSON.parse('{"__proto__":{"evidence":"original"},"api_key":"synthetic-secret"}');
+  const output = redactForRecording(input);
+  expect(Object.hasOwn(output as object, '__proto__')).toBe(true);
+  expect(JSON.parse(JSON.stringify(output))).toEqual({ ...JSON.parse('{"__proto__":{"evidence":"original"}}'), api_key: '[REDACTED]' });
+});
+
+it('rejects malformed fixtures and unsafe trial counts before creating a provider', async () => {
+  let created = 0;
+  const config = resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG);
+  const invalid = { ...OFFLINE_EVALUATION_FIXTURES[0], expected: { ...OFFLINE_EVALUATION_FIXTURES[0].expected, requiredFacts: 'not an array' } };
+  await expect(runLiveEvaluation(config, [invalid as unknown as EvaluationFixture], () => { created++; return new FakeModel({}); }, () => new RecordedInvariantToolClient())).rejects.toThrow();
+  await expect(runLiveEvaluation({ ...config, trialsPerCase: Number.MAX_SAFE_INTEGER + 1 }, [], () => { created++; return new FakeModel({}); }, () => new RecordedInvariantToolClient())).rejects.toThrow();
+  expect(created).toBe(0);
+});
+
+it('does not treat inherited object keys as configured case targets', async () => {
+  const fixture = { ...OFFLINE_EVALUATION_FIXTURES[0], id: 'toString' };
+  const config = resolveLiveEvaluationConfig({ ...DEFAULT_LIVE_EVALUATION_CONFIG, caseTargets: undefined });
+  const client = new RecordedInvariantToolClient();
+  const artifacts = await runLiveEvaluation(config, [fixture], () => new FakeModel(responseFor(fixture)), () => client);
+  expect(artifacts.every((entry) => entry.status === 'completed')).toBe(true);
+  expect(client.requests[0]).toMatchObject({ domain: config.domain, function: config.function });
+});

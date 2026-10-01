@@ -5,6 +5,7 @@
  * supplied through EvaluationModel, while tests can use RecordedResponseSource
  * to replay responses without credentials, time, or network access.
  */
+import { parseJsonValue, deepFreeze } from './decision-context';
 
 export const EVALUATION_FIXTURE_VERSION = 'evaluation-v0' as const;
 export const TRIAL_RECORD_VERSION = 'trial-v0' as const;
@@ -217,7 +218,7 @@ function stableJson(value: unknown): string {
 }
 
 function cloneJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value)) as unknown;
+  return parseJsonValue(value, '$');
 }
 
 function visibleFixture(fixture: EvaluationFixture): ModelVisibleFixture {
@@ -414,15 +415,20 @@ export function scoreResponse(fixture: EvaluationFixture, value: unknown): Score
 }
 
 function validateFixture(fixture: EvaluationFixture): EvaluationFixture {
+  if (!isPlainObject(fixture) || !isPlainObject(fixture.expected)) throw new Error('Invalid evaluation fixture.');
   if (fixture.version !== EVALUATION_FIXTURE_VERSION) throw new Error(`Unsupported fixture version: ${fixture.version}.`);
   if (!nonEmptyString(fixture.id) || !EVALUATION_CASE_FAMILIES.includes(fixture.family)) throw new Error(`Invalid fixture ${fixture.id}.`);
   if (!nonEmptyString(fixture.prompt)) throw new Error(`Fixture ${fixture.id} must have a prompt.`);
   const allFacts = stringList(fixture.knownFacts, `${fixture.id}.knownFacts`);
   const allConstraints = stringList(fixture.knownConstraints, `${fixture.id}.knownConstraints`);
   if (fixture.expected.answer !== null && !nonEmptyString(fixture.expected.answer)) throw new Error(`Invalid expected answer for ${fixture.id}.`);
-  for (const value of fixture.expected.requiredFacts) if (!allFacts.includes(value)) throw new Error(`Unknown required fact ${value}.`);
-  for (const value of fixture.expected.requiredConstraints) if (!allConstraints.includes(value)) throw new Error(`Unknown required constraint ${value}.`);
+  for (const value of stringList(fixture.expected.requiredFacts, `${fixture.id}.expected.requiredFacts`)) if (!allFacts.includes(value)) throw new Error(`Unknown required fact ${value}.`);
+  for (const value of stringList(fixture.expected.requiredConstraints, `${fixture.id}.expected.requiredConstraints`)) if (!allConstraints.includes(value)) throw new Error(`Unknown required constraint ${value}.`);
   return fixture;
+}
+
+export function snapshotEvaluationFixture(value: EvaluationFixture): EvaluationFixture {
+  return validateFixture(cloneJson(value) as EvaluationFixture);
 }
 
 function trialId(adapter: AdapterKind, fixture: EvaluationFixture): string {
@@ -435,13 +441,13 @@ function makeTrialRecord(
   rawResponse: unknown,
   invariantToolEvidence?: RedactedInvariantToolEvidence,
 ): TrialRecord {
-  const score = scoreResponse(fixture, rawResponse);
-  const status = score.episodeStatus;
   const response = cloneJson(rawResponse);
+  const score = scoreResponse(fixture, response);
+  const status = score.episodeStatus;
   const episode = status === 'completed'
     ? { status }
     : { status, reason: isPlainObject(response) && nonEmptyString(response.reason) ? response.reason : score.reason };
-  return Object.freeze({
+  return deepFreeze({
     version: TRIAL_RECORD_VERSION,
     trialId: trialId(adapter, fixture),
     fixtureId: fixture.id,
@@ -458,7 +464,7 @@ function createAdapter(kind: AdapterKind): EvaluationAdapter {
   return {
     kind,
     async run(fixtureInput, model, invariantToolClient) {
-      const fixture = validateFixture(fixtureInput);
+      const fixture = snapshotEvaluationFixture(fixtureInput);
       let invariantContext: ModelRequest['invariantContext'];
       let invariantToolEvidence: RedactedInvariantToolEvidence | undefined;
       if (kind === 'llm-invariant') {
@@ -473,8 +479,8 @@ function createAdapter(kind: AdapterKind): EvaluationAdapter {
           if (typeof client.evaluate !== 'function') {
             throw new Error('Live InvariantToolClient must implement evaluate.');
           }
-          const toolRequest = options.invariantToolRequest(fixture);
-          const toolResponse = await client.evaluate(toolRequest);
+          const toolRequest = cloneJson(options.invariantToolRequest(fixture)) as DomainEvaluateRequest;
+          const toolResponse = cloneJson(await client.evaluate(toolRequest));
           invariantContext = {
             tool: 'domain.evaluate',
             request: toolRequest,
@@ -485,13 +491,13 @@ function createAdapter(kind: AdapterKind): EvaluationAdapter {
           if (typeof legacyClient.getContext !== 'function') {
             throw new Error('InvariantToolClient must implement getContext.');
           }
-          const toolRequest: InvariantToolRequest = {
+          const toolRequest: InvariantToolRequest = Object.freeze({
             version: INVARIANT_TOOL_REQUEST_VERSION,
             tool: INVARIANT_TOOL_NAME,
             fixtureId: fixture.id,
             fixtureVersion: fixture.version,
             prompt: fixture.prompt,
-          };
+          });
           const toolResult = validateInvariantToolResult(await legacyClient.getContext(toolRequest));
           invariantContext = {
             knownFacts: [...toolResult.knownFacts],
@@ -500,12 +506,12 @@ function createAdapter(kind: AdapterKind): EvaluationAdapter {
           invariantToolEvidence = redactedToolEvidence(toolRequest, toolResult);
         }
       }
-      const request: ModelRequest = {
+      const request: ModelRequest = deepFreeze({
         fixture: visibleFixture(fixture),
         adapter: kind,
         prompt: fixture.prompt,
         ...(invariantContext === undefined ? {} : { invariantContext }),
-      };
+      });
       const rawResponse = await model.complete(request);
       return makeTrialRecord(kind, fixture, rawResponse, invariantToolEvidence);
     },
