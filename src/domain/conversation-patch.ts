@@ -31,6 +31,7 @@ export interface ConversationToValidatedPatchInput {
 }
 
 export interface ConversationPatchProviderRequest {
+  readonly currentDomain?: unknown;
   readonly conversation: readonly ConversationTurn[];
   readonly currentDomainVersion: string;
   readonly unresolvedItems: readonly DomainUnknown[];
@@ -99,6 +100,30 @@ export const CONVERSATION_PATCH_OUTPUT_SCHEMA = Object.freeze({
       type: 'object',
       additionalProperties: false,
       required: ['contractVersion', 'kind', 'baseVersion', 'provenance', 'operations'],
+      properties: {
+        contractVersion: { const: 'domain-patch-v0' },
+        kind: { const: 'domain-patch' },
+        baseVersion: { type: 'string' },
+        provenance: {
+          type: 'object', additionalProperties: false, required: ['source', 'reference'],
+          properties: { source: { const: 'conversation' }, reference: { type: 'string' }, actor: { type: 'string' } },
+        },
+        operations: {
+          type: 'array', items: {
+            type: 'object',
+            description: 'Each operation must use exactly its named payload: add_type/type, add_function/function, add_rule/functionId+rule, add_example/example, mark_unknown/unknown, resolve_unknown/unknownId+resolution, add_conflict/conflict. Reuse currentDomain contracts. Rules have id, numeric priority, when expression, and then allow or deny. Unknowns have id, kind=unknown, subject, description. Conflicts have id, kind=conflict, subject, alternatives string array. Preserve uncertainty.',
+            required: ['op'],
+            properties: {
+              op: { enum: ['add_type', 'add_function', 'add_rule', 'add_example', 'mark_unknown', 'resolve_unknown', 'add_conflict'] },
+              type: { type: 'object' }, function: { type: 'object' },
+              functionId: { type: 'string' }, rule: { type: 'object' },
+              example: { type: 'object' }, unknown: { type: 'object' },
+              unknownId: { type: 'string' }, resolution: {}, conflict: { type: 'object' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
     },
     operationEvidence: {
       type: 'array',
@@ -389,6 +414,7 @@ export async function generateValidatedDomainPatch(
     try {
       output = await generateWithTimeout(provider, {
       conversation: input.conversation,
+      currentDomain: input.currentDomain,
       currentDomainVersion: input.currentDomainVersion,
       unresolvedItems: input.unresolvedItems,
       outputSchema: CONVERSATION_PATCH_OUTPUT_SCHEMA,
@@ -450,4 +476,5 @@ export async function generateValidatedDomainPatch(
   }
   return failure('REPAIR_EXHAUSTED', '$.provider', 'Provider attempts exhausted without a valid patch.', { attempts: MAX_CONVERSATION_PATCH_PROVIDER_ATTEMPTS, attemptDiagnostics });
 }
+
 

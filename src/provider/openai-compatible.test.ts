@@ -69,14 +69,13 @@ describe('OpenAI-compatible conversation patch adapter', () => {
       type: 'json_schema',
       json_schema: {
         name: 'conversation_domain_patch',
-        strict: true,
+        strict: false,
         schema: CONVERSATION_PATCH_OUTPUT_SCHEMA,
       },
     });
     expect(body.messages).toEqual([
       expect.objectContaining({ role: 'system' }),
-      { role: 'user', content: 'Members under 18 are denied.' },
-      { role: 'user', content: JSON.stringify({ currentDomainVersion: 'domain-v0', unresolvedItems: [] }) },
+      { role: 'user', content: JSON.stringify({ conversation, currentDomainVersion: 'domain-v0', unresolvedItems: [] }) },
     ]);
   });
 
@@ -140,6 +139,7 @@ describe('OpenAI-compatible conversation patch adapter', () => {
     const body = JSON.parse(String(receivedInit?.body)) as Record<string, any>;
     const metadata = JSON.parse(String((body.messages as Array<{ content: string }>).at(-1)?.content)) as Record<string, unknown>;
     expect(metadata).toEqual({
+      conversation,
       currentDomainVersion: 'domain-v0',
       unresolvedItems: [],
       attempt: 2,
@@ -149,7 +149,7 @@ describe('OpenAI-compatible conversation patch adapter', () => {
       type: 'json_schema',
       json_schema: {
         name: 'conversation_domain_patch',
-        strict: true,
+        strict: false,
         schema: CONVERSATION_PATCH_OUTPUT_SCHEMA,
       },
     });
@@ -157,5 +157,6 @@ describe('OpenAI-compatible conversation patch adapter', () => {
   });
 
 });
+
 
 

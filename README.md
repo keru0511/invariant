@@ -46,3 +46,14 @@ npm run hooks:install
 - `POST /mcp`（および `OPTIONS /mcp`）: 2026-07-28 Modern MCP (Streamable HTTP) エンドポイント。
   - **ツール**:
     - `domain.ping`: ドメインコアの疎通・健全性を確認し、決定論的に `{ ok: true }` を返却します。
+
+
+## 会話からルール案を作成・承認
+
+認証済みMCPには `domain.evaluate` / `domain.describe` / `domain.validate` /
+`domain.search` に加え、`domain.propose` と `domain.commit` があります。
+既存ドメインへの変更案を作り、引用元・変更内容・未解決事項を確認した後、
+承認した案だけを新しいバージョンとして保存できます。
+
+設定、マイグレーション、承認の責務、競合・再試行の仕様は
+[会話からのルール作成](docs/domain-authoring-mcp.md)を参照してください。
