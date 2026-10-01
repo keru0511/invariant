@@ -1008,3 +1008,11 @@ describe('MCP numeric overflow boundary', () => {
     expect(result.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'INVALID_ARGS' })]));
   });
 });
+
+it('exposes the grounded-answer workflow during modern server discovery', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'server/discover' }), TEST_ENV);
+  const body = await response.json() as { result: { instructions?: string } };
+  expect(body.result.instructions).toContain('Never invent input facts');
+  expect(body.result.instructions).toContain('unresolved, ambiguous, conflict, or error');
+  expect(body.result.instructions).toContain('explicit human approval');
+});

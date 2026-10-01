@@ -334,3 +334,28 @@ describe('review evidence snapshot', () => {
     expect(proposed.review.sources[0].content).toBe(input.conversation[0].content);
   });
 });
+
+describe('discover current knowledge rather than stale rules', () => {
+  it('prioritizes the current published version when the search limit is small', async () => {
+    const s = await setup();
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: catalog });
+    const top = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 1 }, s)).value;
+    expect(top.results[0].versionId).toBe('v2');
+    expect(top.results[0].isCurrentVersion).toBe(true);
+    const all = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 10 }, s)).value;
+    expect(all.results.find((item) => item.versionId === 'v1').isCurrentVersion).toBe(false);
+  });
+});
+
+it('marks a historical-only search hit as historical instead of claiming it is current', async () => {
+  const s = await setup();
+  const replacement = structuredClone(catalog);
+  replacement.functions[0].name = 'new-member-rule';
+  replacement.functions[0].description = 'Replaced rule';
+  await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: replacement });
+  const search = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 10 }, s)).value;
+  expect(search.results).toHaveLength(1);
+  expect(search.results[0]).toMatchObject({ versionId: 'v1', isCurrentVersion: false });
+  const old = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+  expect(old.decision).toBe('allow'); // Historical replay remains explicitly supported.
+});

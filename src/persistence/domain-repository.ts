@@ -52,6 +52,7 @@ export interface DomainVersionRecord {
 }
 
 export interface DomainSearchCandidate {
+  readonly isCurrentVersion?: boolean;
   readonly workspaceId: string;
   readonly domainId: string;
   readonly domainName: string;
@@ -62,6 +63,7 @@ export interface DomainSearchCandidate {
 }
 
 export interface DomainSearchMatch {
+  readonly isCurrentVersion?: boolean;
   readonly domainId: string;
   readonly domainName: string;
   readonly versionId: string;
@@ -110,6 +112,7 @@ interface StoredVersionRow {
 }
 
 interface StoredSearchRow extends StoredVersionRow {
+  readonly current_version_id?: string | null;
   readonly domain_name: string;
 }
 
@@ -141,10 +144,12 @@ const SELECT_SEARCH_VERSIONS = `
     d.name AS domain_name,
     v.version_id,
     v.model_json,
-    v.published_at
+    v.published_at,
+    h.version_id AS current_version_id
   FROM domains AS d
   INNER JOIN domain_versions AS v
     ON v.workspace_id = d.workspace_id AND v.domain_id = d.id
+  LEFT JOIN domain_heads h ON h.workspace_id = d.workspace_id AND h.domain_id = d.id
   WHERE d.workspace_id = ?
 `;
 
@@ -172,7 +177,8 @@ function compareText(left: string, right: string): number {
 }
 
 function compareCandidates(left: DomainSearchCandidate, right: DomainSearchCandidate): number {
-  return compareText(left.domainName, right.domainName)
+  return Number(right.isCurrentVersion === true) - Number(left.isCurrentVersion === true)
+    || compareText(left.domainName, right.domainName)
     || compareText(left.domainId, right.domainId)
     || compareText(left.functionName, right.functionName)
     || compareText(left.functionId, right.functionId)
@@ -380,6 +386,7 @@ export class D1DomainRepository {
           continue;
         }
         candidates.push(Object.freeze({
+          ...(row.current_version_id == null ? {} : { isCurrentVersion: row.version_id === row.current_version_id }),
           workspaceId: row.workspace_id,
           domainId: row.domain_id,
           domainName: row.domain_name,

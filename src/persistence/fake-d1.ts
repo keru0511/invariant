@@ -183,6 +183,8 @@ export class FakeD1Database {
             version_id: version.version_id,
             model_json: version.model_json,
             published_at: version.published_at,
+            // Emulate the AFTER INSERT head trigger, not lexical version order.
+            current_version_id: [...this.versions.values()].filter((entry) => entry.workspace_id === version.workspace_id && entry.domain_id === version.domain_id).at(-1)?.version_id,
           };
         });
       return result(rows as T[]);
