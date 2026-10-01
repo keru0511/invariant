@@ -191,3 +191,9 @@ describe('integer precision boundary', () => {
     expect(result.errors[0].code).toBe('INVALID_DOMAIN');
   });
 });
+
+it('freezes rule references inside diagnostics so the recorded explanation cannot drift', () => {
+  const result = evaluate(functionCatalog, 'account-review', accountConflict.input);
+  expect(result.status).toBe('conflict');
+  expect(Object.isFrozen(result.errors[0].ruleIds)).toBe(true);
+});

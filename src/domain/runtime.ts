@@ -1,3 +1,4 @@
+import { MAX_JSON_VALUE_DEPTH } from './decision-context';
 import { compareCanonicalText } from './canonical-order';
 import { isDomainNumber } from './numeric';
 /**
@@ -421,7 +422,8 @@ function isDomainScalar(value: unknown): value is DomainScalar {
   );
 }
 
-function isJsonValue(value: unknown, active: WeakSet<object>): value is DomainJsonValue {
+function isJsonValue(value: unknown, active: WeakSet<object>, depth = 0): value is DomainJsonValue {
+  if (depth > MAX_JSON_VALUE_DEPTH) return false;
   if (value === null) return true;
   if (typeof value === 'boolean' || typeof value === 'string') return true;
   if (typeof value === 'number') return isDomainNumber(value);
@@ -433,14 +435,14 @@ function isJsonValue(value: unknown, active: WeakSet<object>): value is DomainJs
   let valid = true;
   if (Array.isArray(value)) {
     for (const item of value) {
-      if (!isJsonValue(item, active)) {
+      if (!isJsonValue(item, active, depth + 1)) {
         valid = false;
         break;
       }
     }
   } else {
     for (const item of Object.values(value)) {
-      if (!isJsonValue(item, active)) {
+      if (!isJsonValue(item, active, depth + 1)) {
         valid = false;
         break;
       }

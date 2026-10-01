@@ -178,7 +178,12 @@ export function parseFiniteNumber(value: unknown, path: string, label = 'value')
   return value;
 }
 
+export const MAX_JSON_VALUE_DEPTH = 512 as const;
+
 export function parseJsonValue(value: unknown, path: string, ancestors = new Set<object>()): JsonValue {
+  if (ancestors.size > MAX_JSON_VALUE_DEPTH) {
+    fail(DECISION_VALIDATION_ERROR_CODES.INVALID_JSON, 'JSON nesting exceeds the supported limit.', path);
+  }
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return value;
   }
@@ -229,7 +234,7 @@ export function parseJsonValue(value: unknown, path: string, ancestors = new Set
     }
 
     const result: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
-    for (const key of Object.keys(value)) {
+    for (const key of Object.keys(value).sort()) {
       result[key] = parseJsonValue(value[key], `${path}.${key}`, ancestors);
     }
     return Object.freeze(result);

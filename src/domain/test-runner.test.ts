@@ -99,3 +99,31 @@ describe('pure Domain example test runner', () => {
     expect(JSON.stringify(domain)).toBe(before);
   });
 });
+
+it('includes every manifest fixture, including ambiguous decisions', async () => {
+  const manifest = (await import('../../fixtures/domain-v0/manifest.json')).default;
+  expect(STORED_DOMAIN_EXAMPLES.map((item) => item.id).sort()).toEqual(manifest.fixtures.map((item) => item.id).sort());
+});
+
+it('does not count a nonexistent function ID as a passing test because its suffix matches a real name', () => {
+  const example = STORED_DOMAIN_EXAMPLES[0];
+  const report = runTests(functionCatalog, [{ ...example, functionId: 'nonexistent.member-age' }]);
+  expect(report.status).toBe('failed');
+  expect(report.examples[0].actual.errors[0].code).toBe('INVALID_FUNCTION');
+});
+
+it('resolves the declared function ID even if its name differs from the ID suffix', () => {
+  const domain = structuredClone(functionCatalog);
+  domain.functions[0].name = 'eligibility-by-age';
+  const report = runTests(domain, [STORED_DOMAIN_EXAMPLES[0]]);
+  expect(report.status).toBe('passed');
+});
+
+it('keeps both built-in and returned expected results detached and immutable', () => {
+  expect(Object.isFrozen(STORED_DOMAIN_EXAMPLES[0].expected)).toBe(true);
+  const example = structuredClone(STORED_DOMAIN_EXAMPLES[0]);
+  const report = runTests(functionCatalog, [example]);
+  expect(report.examples[0].expected).not.toBe(example.expected);
+  expect(Object.isFrozen(report.examples[0].expected)).toBe(true);
+  expect(Object.isFrozen(report.examples[0].expected.provenance.ruleIds)).toBe(true);
+});

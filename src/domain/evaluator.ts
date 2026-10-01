@@ -99,7 +99,9 @@ function error(
   message: string,
   details: Omit<EvaluationError, 'code' | 'message'> = {},
 ): EvaluationError {
-  return freeze({ code, message, ...details });
+  return freeze({ code, message, ...details,
+    ...(details.ruleIds === undefined ? {} : { ruleIds: freeze([...details.ruleIds]) }),
+  });
 }
 
 function traceId(domainFunction: DomainFunction, suffix: string): string {

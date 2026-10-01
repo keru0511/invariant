@@ -161,3 +161,29 @@ describe('Domain Patch v0', () => {
     if (!result.ok) expect(result.error.code).toBe('INVALID_PROVENANCE');
   });
 });
+
+describe('JSON values retain their meaning at the patch boundary', () => {
+  it('preserves __proto__ as a data key rather than a prototype assignment', () => {
+    const resolution = JSON.parse('{"__proto__":{"verified":true},"answer":"unknown"}');
+    const parsed = parseDomainPatch(patch([{ op: 'resolve_unknown', unknownId: 'u', resolution }]));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      const operation = parsed.value.operations[0];
+      if (operation.op !== 'resolve_unknown') throw new Error('Wrong operation');
+      expect(JSON.parse(JSON.stringify(operation.resolution))).toEqual(resolution);
+    }
+  });
+
+  it('returns a typed failure for cyclic values rather than overflowing the stack', () => {
+    const resolution: Record<string, unknown> = {};
+    resolution.self = resolution;
+    const value = patch([{ op: 'resolve_unknown', unknownId: 'u', resolution }]);
+    expect(() => parseDomainPatch(value)).not.toThrow();
+    expect(parseDomainPatch(value).ok).toBe(false);
+  });
+
+  it('rejects class instances instead of silently replacing them with an empty object', () => {
+    const value = patch([{ op: 'resolve_unknown', unknownId: 'u', resolution: new Date('2026-01-01') }]);
+    expect(parseDomainPatch(value).ok).toBe(false);
+  });
+});

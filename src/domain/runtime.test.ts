@@ -358,3 +358,11 @@ describe('Domain v0 runtime validation', () => {
   });
 
 });
+
+it('rejects excessive fixture JSON nesting without throwing a stack overflow', () => {
+  let value: unknown = true;
+  for (let i = 0; i < 10000; i++) value = { nested: value };
+  const fixture = { ...memberAgeBoundary, input: { user: value } };
+  expect(() => parseGoldenFixture(fixture)).not.toThrow();
+  expect(parseGoldenFixture(fixture).ok).toBe(false);
+});

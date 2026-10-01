@@ -1,3 +1,4 @@
+import { parseJsonValue as parseJsonSnapshot, DecisionValidationError } from './decision-context';
 /**
  * Runtime-validated, copy-on-write Domain Patch operations.
  *
@@ -198,29 +199,11 @@ function nonEmptyString(value: unknown, path: string): DomainPatchResult<string>
 }
 
 function parseJsonValue(value: unknown, path: string): DomainPatchResult<DomainJsonValue> {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return success(value);
-  if (typeof value === 'number') {
-    return Number.isFinite(value)
-      ? success(value)
-      : failure(patchError('INVALID_PATCH', path, 'Expected a finite JSON number.'));
+  try { return success(parseJsonSnapshot(value, path)); }
+  catch (error) {
+    return failure(patchError('INVALID_PATCH', error instanceof DecisionValidationError ? error.path : path,
+      'Expected a finite, acyclic, depth-bounded plain JSON value.'));
   }
-  if (Array.isArray(value)) {
-    const parsed: DomainJsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const item = parseJsonValue(value[index], path + '[' + index + ']');
-      if (isFailure(item)) return item;
-      parsed.push(item.value);
-    }
-    return success(Object.freeze(parsed));
-  }
-  if (!isRecord(value)) return failure(patchError('INVALID_PATCH', path, 'Expected a JSON value.'));
-  const parsed: Record<string, DomainJsonValue> = {};
-  for (const key of Object.keys(value).sort()) {
-    const item = parseJsonValue(value[key], path + '.' + key);
-    if (isFailure(item)) return item;
-    parsed[key] = item.value;
-  }
-  return success(Object.freeze(parsed));
 }
 
 function parseProvenance(value: unknown, path: string): DomainPatchResult<DomainPatchProvenance> {
