@@ -181,6 +181,18 @@ const SCORE_POINTS: Readonly<Record<ScoreLabel, -1 | 0 | 1>> = {
   invalid: -1,
 };
 
+/** Shape and internal consistency only; re-score against a fixture to establish correctness. */
+export function isScoreResult(value: unknown): value is ScoreResult {
+  if (!isPlainObject(value) || typeof value.label !== 'string' || !Object.hasOwn(SCORE_POINTS, value.label)) return false;
+  const nullableText = (item: unknown) => item === null || typeof item === 'string';
+  return value.points === SCORE_POINTS[value.label as ScoreLabel]
+    && value.passed === (value.label === 'correct')
+    && ['completed', 'missing', 'timeout'].includes(String(value.episodeStatus))
+    && (value.episodeStatus === 'completed' || value.label === 'unknown')
+    && typeof value.reason === 'string' && nullableText(value.expectedAnswer)
+    && (!Object.hasOwn(value, 'observedAnswer') || nullableText(value.observedAnswer));
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -577,23 +589,37 @@ export function serializeTrialRecord(record: TrialRecord): string {
 }
 
 export function deserializeTrialRecord(serialized: string): TrialRecord {
-  const value: unknown = JSON.parse(serialized);
+  const value: unknown = cloneJson(JSON.parse(serialized));
   if (!isPlainObject(value) || value.version !== TRIAL_RECORD_VERSION || !nonEmptyString(value.trialId) ||
       !nonEmptyString(value.fixtureId) || value.fixtureVersion !== EVALUATION_FIXTURE_VERSION ||
       (value.adapter !== 'llm-only' && value.adapter !== 'llm-invariant') || !isPlainObject(value.episode) ||
-      !isPlainObject(value.score)) {
+      !['completed', 'missing', 'timeout'].includes(String(value.episode.status)) ||
+      (Object.hasOwn(value.episode, 'reason') && !nonEmptyString(value.episode.reason)) ||
+      !Object.hasOwn(value, 'response') || !isScoreResult(value.score) || value.score.episodeStatus !== value.episode.status) {
     throw new Error('Invalid trial record.');
+  }
+  if (Object.hasOwn(value, 'invariantToolEvidence')) {
+    const evidence = value.invariantToolEvidence;
+    const count = (item: unknown) => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0;
+    if (!isPlainObject(evidence) || !isPlainObject(evidence.request) || !isPlainObject(evidence.response)
+      || evidence.request.version !== INVARIANT_TOOL_REQUEST_VERSION || evidence.request.tool !== INVARIANT_TOOL_NAME
+      || evidence.request.fixtureId !== value.fixtureId || evidence.request.prompt !== '[REDACTED]'
+      || evidence.response.version !== INVARIANT_TOOL_RESULT_VERSION || evidence.response.knownFacts !== '[REDACTED]'
+      || evidence.response.knownConstraints !== '[REDACTED]' || !count(evidence.response.knownFactsCount)
+      || !count(evidence.response.knownConstraintsCount)) throw new Error('Invalid saved tool evidence.');
   }
   return value as unknown as TrialRecord;
 }
 
 /** Re-score a saved trial with no adapter, clock, filesystem, or network call. */
 export function rescoreTrial(record: TrialRecord, fixture: EvaluationFixture): TrialRecord {
+  record = deserializeTrialRecord(serializeTrialRecord(record));
+  fixture = snapshotEvaluationFixture(fixture);
   if (record.fixtureId !== fixture.id || record.fixtureVersion !== fixture.version) {
     throw new Error(`Trial ${record.trialId} does not match fixture ${fixture.id}.`);
   }
   const score = scoreResponse(fixture, record.response);
-  return Object.freeze({ ...record, score, episode: score.episodeStatus === 'completed'
+  return deepFreeze({ ...record, score, episode: score.episodeStatus === 'completed'
     ? { status: 'completed' }
     : { status: score.episodeStatus, reason: score.reason } });
 }

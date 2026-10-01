@@ -288,3 +288,25 @@ it('scores the same immutable response snapshot that is recorded', async () => {
   expect(record.response).toMatchObject({ answer: 'deny' });
   expect(record.score).toMatchObject({ label: 'correct', observedAnswer: 'deny' });
 });
+
+describe('offline saved record boundaries', () => {
+  it.each(['points', 'label', 'passed', 'episode', 'evidence'])('rejects malformed %s instead of exposing it as a typed result', async (field) => {
+    const fixture = fixtureById('evaluation-v0.threshold');
+    const record = JSON.parse(serializeTrialRecord(await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture) })));
+    if (field === 'points') record.score.points = 999;
+    if (field === 'label') record.score.label = 'unregistered';
+    if (field === 'passed') record.score.passed = 'yes';
+    if (field === 'episode') record.episode.status = 'made-up';
+    if (field === 'evidence') record.invariantToolEvidence = { request: { prompt: 'not redacted' }, response: {} };
+    expect(() => deserializeTrialRecord(JSON.stringify(record))).toThrow();
+  });
+  it('keeps loaded and rescored evidence immutable without freezing the caller object', async () => {
+    const fixture = fixtureById('evaluation-v0.threshold');
+    const original = JSON.parse(serializeTrialRecord(await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture) })));
+    const loaded = deserializeTrialRecord(JSON.stringify(original));
+    expect(Object.isFrozen(loaded.response)).toBe(true);
+    const rescored = rescoreTrial(original, fixture);
+    expect(Object.isFrozen(rescored.score)).toBe(true);
+    expect(Object.isFrozen(original)).toBe(false);
+  });
+});

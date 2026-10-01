@@ -323,6 +323,13 @@ export async function run(mode) {
       report.cases.push({ id: 'verify-' + numerator + '-' + denominator,
         passed: actual.status === expected && JSON.stringify(actual) === JSON.stringify(repeated), expected, actual: actual.status });
     }
+    for (const [quote, expected] of [['料金は未確定', 'matched'], ['料金は確定', 'not_found']]) {
+      const args = { version: 'quote-evidence-v1', source: { id: 'synthetic-source', version: 'v1', text: '料金は未確定。' }, quote };
+      const actual = await mcp(baseUrl, 'evidence.match_quote', args, context.runId);
+      const repeated = await mcp(baseUrl, 'evidence.match_quote', args, context.runId);
+      report.cases.push({ id: 'quote-' + expected, passed: actual.status === expected
+        && actual.scope === 'literal_quote_in_supplied_text' && JSON.stringify(actual) === JSON.stringify(repeated), expected, actual: actual.status });
+    }
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }
   finally {

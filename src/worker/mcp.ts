@@ -1,4 +1,5 @@
 import { calculate, verifyCalculation, CALCULATION_SOURCE_HASH, CALCULATION_VERSION, CALCULATION_FUNCTIONS, MAX_DECIMAL_DIGITS, MAX_DECIMAL_PLACES } from '../domain/calculation';
+import { matchQuote, QUOTE_EVIDENCE_VERSION, MAX_SOURCE_LENGTH, MAX_QUOTE_LENGTH } from '../domain/quote-evidence';
 import { guardKnowledge } from '../domain/knowledge-guard';
 import { proposeInputSchema, commitInputSchema, proposeDomain, commitDomain, productionAuthoringDependencies, authoringFailure, type AuthoringDependencies } from './domain-authoring';
 import {
@@ -45,6 +46,7 @@ export const INVARIANT_USAGE_INSTRUCTIONS = [
   'Invariant evaluates explicitly encoded rules; it is not a general factual-truth oracle.',
   'For arithmetic, use calculation.describe and calculation.evaluate with explicit version and decimal strings. Do not estimate the result yourself. Keep exact fractions separate from rounded display values; the tool does not verify real-world input facts.',
   'Use calculation.verify to check a structured numeric claim against that same request and functionId. A verified result covers only the numeric claim, not the surrounding prose or whether the chosen function fits the question.',
+  'Use evidence.match_quote to check a literal quotation against supplied source text. A match never proves the source is authentic or true, or that the quote supports a broader claim.',
   'For a domain-backed answer: search authorized domains, distinguish current from historical versions, describe the exact function, then evaluate that same explicit workspace/domain/version with known inputs.',
   'Never invent input facts, substitute a similar function, or treat descriptions and search hits as evaluated evidence. Ask for missing facts or abstain when no applicable domain is established.',
   'Only resolved permits an allow/deny statement, conditional on the supplied facts and the selected version. Cite that version and the returned rule/provenance identifiers. Do not generalize beyond that scope.',
@@ -624,6 +626,18 @@ function createMcpServer(
     name: 'invariant-mcp',
     version: '0.0.1',
   }, { instructions: INVARIANT_USAGE_INSTRUCTIONS });
+
+  server.registerTool('evidence.match_quote', {
+    description: 'Check exact quote presence in caller-supplied source text, without fetching URLs or executing source instructions. Returns UTF-16 offsets and the SHA-256 of the exact UTF-8 source. Source id/version are caller labels, not authenticated origin. Optional expectedSourceHash rejects changed text. No normalization or semantic/factual verification is performed; even a literal match may be irrelevant or misleading out of context.',
+    inputSchema: z.object({ version: z.literal(QUOTE_EVIDENCE_VERSION),
+      source: z.object({ id: z.string().min(1).max(200), version: z.string().min(1).max(200), text: z.string().min(1).max(MAX_SOURCE_LENGTH) }).strict(),
+      quote: z.string().min(1).max(MAX_QUOTE_LENGTH), expectedSourceHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  }, async (input) => {
+    const result = await matchQuote(input);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], isError: result.status === 'error' || result.status === 'source_mismatch' };
+  });
 
   server.registerTool('calculation.describe', {
     description: 'Describe exact arithmetic functions, their parameter names, formulas, constraints, and version. No facts are inferred.',

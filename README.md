@@ -50,7 +50,7 @@ npm run hooks:install
 ## ローカルMCPでの動作検証
 
 `npm run lab:check` で、ローカルD1の準備・開発サーバー起動・HTTP/MCP経由の
-22ケース検証・結果保存・終了をまとめて実行できます。有料LLMは呼び出しません。
+24ケース検証・結果保存・終了をまとめて実行できます。有料LLMは呼び出しません。
 使い方と安全上の制約は [ローカルMCP検証環境](docs/local-lab.md) を参照してください。
 
 ## 会話からルール案を作成・承認
@@ -79,3 +79,7 @@ npm run hooks:install
 `calculation.describe` / `calculation.evaluate`で、小数文字列を有理数として正確に計算します。
 `calculation.verify`では、同じ計算要求に対する構造化した数値の主張を再照合できます。
 使い方、丸めと正確な値の区別、独立した正解による検証は[計算関数](docs/calculation-functions.md)を参照してください。
+
+## 引用の文字列照合
+
+`evidence.match_quote`で資料本文と引用を完全一致で照合します。本文のハッシュと位置を返しますが、資料の真偽や引用の妥当性を認定するものではありません。[範囲と制約](docs/quote-evidence.md)を参照してください。

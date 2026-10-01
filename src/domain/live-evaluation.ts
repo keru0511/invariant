@@ -10,6 +10,7 @@ import {
   llmOnlyAdapter,
   rescoreTrial,
   scoreResponse,
+  isScoreResult,
   snapshotEvaluationFixture,
   EVALUATION_CASE_FAMILIES,
   EVALUATION_FIXTURE_VERSION,
@@ -577,7 +578,6 @@ export function serializeLiveTrial(artifact: LiveTrialArtifact): string {
 export function deserializeLiveTrial(serialized: string): LiveTrialArtifact {
   const value: unknown = parseJsonValue(JSON.parse(serialized), '$');
   const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-  const nullableText = (value: unknown) => value === null || typeof value === 'string';
   const episode = (value: unknown) => ['completed', 'missing', 'timeout'].includes(String(value));
   const score = isRecord(value) ? value.score : undefined;
   const error = isRecord(value) ? value.error : undefined;
@@ -596,10 +596,7 @@ export function deserializeLiveTrial(serialized: string): LiveTrialArtifact {
       (value.invariantToolRequest !== null && (!isRecord(value.invariantToolRequest)
         || !['workspace', 'domain', 'version', 'function'].every((key) => text((value.invariantToolRequest as Record<string, unknown>)[key]))
         || !isRecord(value.invariantToolRequest.args))) ||
-      (score !== null && (!isRecord(score) || !['correct', 'wrong', 'unknown', 'invented', 'invalid'].includes(String(score.label))
-        || ![-1, 0, 1].includes(score.points as number) || typeof score.passed !== 'boolean' || !episode(score.episodeStatus)
-        || typeof score.reason !== 'string' || !nullableText(score.expectedAnswer)
-        || (Object.hasOwn(score, 'observedAnswer') && !nullableText(score.observedAnswer)))) ||
+      (score !== null && !isScoreResult(score)) ||
       (error !== null && (!isRecord(error) || typeof error.name !== 'string' || typeof error.message !== 'string')) ||
       (value.status === 'error' ? error === null || score !== null || value.response !== null
         : error !== null || score === null || (isRecord(score) && score.episodeStatus !== value.status))) {

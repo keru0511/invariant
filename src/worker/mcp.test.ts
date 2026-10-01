@@ -1042,3 +1042,10 @@ it('detects a rounded answer incorrectly claimed as exact through MCP', async ()
   expect(await readToolResult(response)).toMatchObject({ status: 'mismatch', scope: 'numeric_claim_for_supplied_request',
     expected: { result: { numerator: '1', denominator: '3', decimal: null } } });
 });
+
+it('checks a literal quote through MCP without claiming factual verification', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'evidence.match_quote', params: {
+    name: 'evidence.match_quote', arguments: { version: 'quote-evidence-v1', source: { id: 'synthetic', version: 'v1', text: '料金は未確定。' }, quote: '料金は確定。' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'not_found', scope: 'literal_quote_in_supplied_text', source: { origin: 'caller_supplied' } });
+});
