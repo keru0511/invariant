@@ -28,6 +28,8 @@ export type DecisionComparisonStatus = (typeof DECISION_COMPARISON_STATUSES)[num
 
 export type DecisionInputChangeKind =
   | 'fact'
+  | 'fact_description'
+  | 'objective_description'
   | 'constraint'
   | 'objective_weight'
   | 'unknown'
@@ -39,6 +41,9 @@ export interface DecisionInputChange {
   readonly id: string;
   readonly before: JsonValue | null;
   readonly after: JsonValue | null;
+  /** Present when null values would otherwise hide entity addition/removal. */
+  readonly beforePresent?: boolean;
+  readonly afterPresent?: boolean;
 }
 
 export interface DecisionComparison {
@@ -91,7 +96,10 @@ function changedValues<T extends { readonly id: string }>(
     const after = afterItem === undefined ? null : read(afterItem);
     if (beforeItem === undefined || afterItem === undefined ||
         stableJsonStringify(before) !== stableJsonStringify(after)) {
-      changes.push({ kind, id, before, after });
+      changes.push({ kind, id, before, after,
+        ...(before === null && after === null && (beforeItem === undefined || afterItem === undefined)
+          ? { beforePresent: beforeItem !== undefined, afterPresent: afterItem !== undefined } : {}),
+      });
     }
   }
   return changes;
@@ -116,8 +124,10 @@ function changedTextValues(
 function compareInputs(left: DecisionContext, right: DecisionContext): readonly DecisionInputChange[] {
   const changes = [
     ...changedValues(left.facts, right.facts, (item) => item.value, 'fact'),
+    ...changedValues(left.facts, right.facts, (item) => item.description ?? null, 'fact_description').filter((change) => change.before !== change.after),
     ...changedValues(left.hardConstraints, right.hardConstraints, (item) => item.description, 'constraint'),
     ...changedValues(left.objectives, right.objectives, (item) => item.weight, 'objective_weight'),
+    ...changedValues(left.objectives, right.objectives, (item) => item.description, 'objective_description'),
     ...changedTextValues(left.outOfScope, right.outOfScope, 'out_of_scope'),
     ...changedValues(left.unknowns, right.unknowns, (item) => item.description, 'unknown'),
     ...changedValues(left.alternatives, right.alternatives, (item) => item.description, 'alternative'),
@@ -125,11 +135,13 @@ function compareInputs(left: DecisionContext, right: DecisionContext): readonly 
 
   const kindOrder: Record<DecisionInputChangeKind, number> = {
     fact: 0,
-    constraint: 1,
-    objective_weight: 2,
-    unknown: 3,
-    alternative: 4,
-    out_of_scope: 5,
+    fact_description: 1,
+    constraint: 2,
+    objective_weight: 3,
+    objective_description: 4,
+    unknown: 5,
+    alternative: 6,
+    out_of_scope: 7,
   };
   return changes.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || compareCanonicalText(a.id, b.id));
 }

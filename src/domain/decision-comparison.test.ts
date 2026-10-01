@@ -235,3 +235,31 @@ describe('compareDecisionRecords', () => {
     ]);
   });
 });
+
+it('reports the changed meaning of an objective even when its weight is unchanged', () => {
+  const result = compareDecisionRecords(resolved(), resolved({ contextSnapshot: withContext({
+    objectives: [{ id: 'cost', description: 'Maximize cost.', weight: 1 }],
+  }) }));
+  expect(result).toEqual({ status: 'inputs_changed', changed_inputs: [
+    { kind: 'objective_description', id: 'cost', before: 'Minimize cost.', after: 'Maximize cost.' },
+  ] });
+});
+
+it('reports changed fact descriptions, including units, instead of returning an empty diff', () => {
+  const before = resolved({ contextSnapshot: withContext({ facts: [{ id: 'amount', value: 100, description: 'JPY' }] }) });
+  const after = resolved({ contextSnapshot: withContext({ facts: [{ id: 'amount', value: 100, description: 'USD' }] }) });
+  expect(compareDecisionRecords(before, after)).toEqual({ status: 'inputs_changed', changed_inputs: [
+    { kind: 'fact_description', id: 'amount', before: 'JPY', after: 'USD' },
+  ] });
+});
+
+it('distinguishes a recorded null fact from an absent fact in a change report', () => {
+  const absent = resolved({ contextSnapshot: withContext({ facts: [] }) });
+  const explicitNull = resolved({ contextSnapshot: withContext({ facts: [{ id: 'nullable', value: null }] }) });
+  expect(compareDecisionRecords(absent, explicitNull).changed_inputs).toEqual([
+    { kind: 'fact', id: 'nullable', before: null, after: null, beforePresent: false, afterPresent: true },
+  ]);
+  expect(compareDecisionRecords(explicitNull, absent).changed_inputs).toEqual([
+    { kind: 'fact', id: 'nullable', before: null, after: null, beforePresent: true, afterPresent: false },
+  ]);
+});
