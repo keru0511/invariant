@@ -311,3 +311,24 @@ describe('immutable provider boundary', () => {
    expect(Object.isFrozen(CONVERSATION_PATCH_OUTPUT_SCHEMA.properties.patch.properties.operations.items.properties.op.enum)).toBe(true);
    expect(Object.isFrozen(CONVERSATION_PATCH_OUTPUT_SCHEMA.properties.operationEvidence.items.required)).toBe(true);
  });
+
+describe('validate knowledge before invoking a provider', () => {
+  it('rejects an invalid source domain without spending a provider attempt', async () => {
+    let calls = 0;
+    const provider = { generate: async () => { calls++; return { patch: patch([]), operationEvidence: [] }; } };
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain: { invalid: true },
+      currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider);
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    expect(calls).toBe(0);
+  });
+
+  it('rejects inconsistent unresolved items rather than presenting two different knowledge states', async () => {
+    let calls = 0;
+    const currentDomain = { contractVersion: 'domain-v0', kind: 'domain-model', version: 'domain-v0', domain: functionCatalog,
+      types: [], examples: [], conflicts: [], unknowns: [{ id: 'u', kind: 'unknown', subject: 'country', description: 'Unknown' }] };
+    const result = await generateValidatedDomainPatch({ conversation, currentDomain, currentDomainVersion: 'domain-v0', unresolvedItems: [] },
+      { generate: async () => { calls++; return { patch: patch([]), operationEvidence: [] }; } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    expect(calls).toBe(0);
+  });
+});

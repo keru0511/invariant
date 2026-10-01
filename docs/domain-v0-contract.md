@@ -151,3 +151,10 @@ partial candidate. Successful results preserve operation order and are deeply
 frozen. Reapplying the same patch to the same base produces the same serialized
 result. Final validation retains the Domain v0 distinction between
 `unresolved`, `conflict`, `ambiguous`, and `error`.
+
+## 数値表現の制約
+
+v0のnumberはIEEE 754の有限数値です。整数はJavaScriptの安全な整数範囲
+（±9007199254740991）に限定し、入力・定数・優先度で範囲外を拒否します。
+任意精度の整数/decimalや金額の正確性は、この表現では保証しません。
+高精度の値は明示的な型と専用の比較規則を設計してから扱う必要があります。

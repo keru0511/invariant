@@ -1,3 +1,5 @@
+import { compareCanonicalText } from './canonical-order';
+import { isDomainNumber } from './numeric';
 /**
  * Runtime validation for the dependency-free Domain v0 JSON contract.
  *
@@ -260,14 +262,14 @@ function readFiniteNumber(
 ): DomainParseResult<number> {
   const value = readField(record, key, path);
   if (isFailure(value)) return failure(value.error);
-  if (typeof value.value !== 'number' || !Number.isFinite(value.value)) {
+  if (!isDomainNumber(value.value)) {
     const fieldPath = childPath(path, key);
     return failure(
       makeError(
         'INVALID_VALUE',
         fieldPath,
-        "Expected a finite number at '" + fieldPath + "', got " + actualType(value.value) + '.',
-        'finite number',
+        "Expected a finite number within the safe integer range at '" + fieldPath + "', got " + actualType(value.value) + '.',
+        'finite number with safe integer precision',
         actualType(value.value),
       ),
     );
@@ -415,14 +417,14 @@ function isDomainScalar(value: unknown): value is DomainScalar {
     value === null ||
     typeof value === 'boolean' ||
     typeof value === 'string' ||
-    (typeof value === 'number' && Number.isFinite(value))
+    isDomainNumber(value)
   );
 }
 
 function isJsonValue(value: unknown, active: WeakSet<object>): value is DomainJsonValue {
   if (value === null) return true;
   if (typeof value === 'boolean' || typeof value === 'string') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'number') return isDomainNumber(value);
   if (typeof value !== 'object') return false;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null && !Array.isArray(value)) return false;
@@ -1456,7 +1458,7 @@ function evaluateFunction(
   const decisions = new Set(highest.map((candidate) => candidate.rule.then));
   const matchedRuleIds = highest
     .map((candidate) => candidate.rule.id)
-    .sort((left, right) => decisions.size === 1 ? left.localeCompare(right) : 0);
+    .sort((left, right) => decisions.size === 1 ? compareCanonicalText(left, right) : 0);
   if (decisions.size > 1) {
     return {
       status: 'conflict',
@@ -1526,7 +1528,7 @@ function stableErrors(errors: readonly DomainParseError[]): readonly DomainParse
     unique.set(key, error);
   }
   return Object.freeze([...unique.values()].sort((left, right) =>
-    left.path.localeCompare(right.path) || left.code.localeCompare(right.code) || left.message.localeCompare(right.message),
+    compareCanonicalText(left.path, right.path) || compareCanonicalText(left.code, right.code) || compareCanonicalText(left.message, right.message),
   ));
 }
 

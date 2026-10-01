@@ -1,3 +1,5 @@
+import { compareCanonicalText } from './canonical-order';
+import { isDomainNumber } from './numeric';
 /**
  * Pure, deterministic evaluation for the Domain v0 contract.
  *
@@ -197,8 +199,8 @@ function argumentErrors(domainFunction: DomainFunction, args: unknown): Argument
       return;
     }
     if (value === null || typeof value !== 'object') {
-      if (typeof value === 'number' && !Number.isFinite(value)) {
-        errors.push(error('INVALID_ARGS', "Input at '" + path + "' must be a finite JSON number.", { path }));
+      if (typeof value === 'number' && !isDomainNumber(value)) {
+        errors.push(error('INVALID_ARGS', "Input at '" + path + "' must be finite and preserve safe integer precision.", { path }));
         return;
       }
       const declaration = declared.get(path);
@@ -583,7 +585,7 @@ function evaluateFunction(context: EvaluationContext): EvaluationResult {
   const decisions = new Set(highest.map((candidate) => candidate.rule.then));
   const matchedRuleIds = highest
     .map((candidate) => candidate.rule.id)
-    .sort((left, right) => decisions.size === 1 ? left.localeCompare(right) : 0);
+    .sort((left, right) => decisions.size === 1 ? compareCanonicalText(left, right) : 0);
   if (decisions.size > 1) {
     const conflict = error(
       'RULE_CONFLICT',

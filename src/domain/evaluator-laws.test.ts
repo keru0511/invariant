@@ -69,3 +69,13 @@ describe('three-valued decision laws', () => {
     expect(result.unresolvedPaths).toEqual(['y']);
   });
 });
+
+it('orders rule identifiers without locale-dependent collation', () => {
+  const domain = model({ id: 'node.z', kind: 'literal', value: true }, [
+    { id: 'rule.ä', priority: 10, then: 'allow', when: { id: 'node.a', kind: 'literal', value: true } },
+  ]);
+  domain.functions[0].policy.rules[0] = { ...domain.functions[0].policy.rules[0], id: 'rule.z' };
+  const result = evaluate(domain, 'law', {});
+  expect(result.status).toBe('ambiguous');
+  expect(result.matchedRuleIds).toEqual(['rule.z', 'rule.ä']);
+});

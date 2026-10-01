@@ -1,3 +1,4 @@
+import { compareCanonicalText } from './canonical-order';
 /**
  * Credential-free orchestration, redaction, recording, and reporting for the
  * live v0 evaluation.  The provider is injected so normal CI remains offline.
@@ -724,7 +725,7 @@ export function aggregateLiveReport(
   fixtures: readonly EvaluationFixture[] = OFFLINE_EVALUATION_FIXTURES,
   generatedAt?: string,
 ): LiveReport {
-  const sorted = [...artifacts].sort((left, right) => left.trialId.localeCompare(right.trialId));
+  const sorted = [...artifacts].sort((left, right) => compareCanonicalText(left.trialId, right.trialId));
   const errors = sorted.filter((item) => item.error !== null).map((item) => ({
     trialId: item.trialId,
     adapter: item.adapter,

@@ -1,3 +1,4 @@
+import { compareCanonicalText } from './canonical-order';
 /**
  * Deterministic comparison of two validated DecisionRecords.
  *
@@ -130,7 +131,7 @@ function compareInputs(left: DecisionContext, right: DecisionContext): readonly 
     alternative: 4,
     out_of_scope: 5,
   };
-  return changes.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.id.localeCompare(b.id));
+  return changes.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || compareCanonicalText(a.id, b.id));
 }
 
 /**
