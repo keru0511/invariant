@@ -4,6 +4,7 @@ export const QUOTE_EVIDENCE_VERSION = 'quote-evidence-v1' as const;
 export const MAX_SOURCE_LENGTH = 100_000;
 export const MAX_QUOTE_LENGTH = 10_000;
 const MAX_MATCHES = 20;
+const CONTEXT_LENGTH = 40;
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -40,11 +41,16 @@ export async function matchQuote(input: unknown) {
     if (request.expectedSourceHash !== undefined && request.expectedSourceHash !== hash) {
       return Object.freeze({ status: 'source_mismatch' as const, version: QUOTE_EVIDENCE_VERSION, source: identity });
     }
-    const matches: Array<{ readonly start: number; readonly end: number }> = [];
+    const matches: Array<{ readonly start: number; readonly end: number; readonly before: string; readonly after: string }> = [];
     let position = source.text.indexOf(request.quote), truncated = false;
     while (position !== -1) {
       if (matches.length === MAX_MATCHES) { truncated = true; break; }
-      matches.push(Object.freeze({ start: position, end: position + request.quote.length }));
+      const end = position + request.quote.length;
+      let contextStart = Math.max(0, position - CONTEXT_LENGTH), contextEnd = Math.min(source.text.length, end + CONTEXT_LENGTH);
+      // Never cut a context excerpt in the middle of a surrogate pair.
+      if (source.text.charCodeAt(contextStart) >= 0xdc00 && source.text.charCodeAt(contextStart) <= 0xdfff) contextStart++;
+      if (source.text.charCodeAt(contextEnd) >= 0xdc00 && source.text.charCodeAt(contextEnd) <= 0xdfff) contextEnd--;
+      matches.push(Object.freeze({ start: position, end, before: source.text.slice(contextStart, position), after: source.text.slice(end, contextEnd) }));
       position = source.text.indexOf(request.quote, position + 1);
     }
     return Object.freeze({ status: matches.length > 0 ? 'matched' as const : 'not_found' as const,

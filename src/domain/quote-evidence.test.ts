@@ -33,3 +33,15 @@ it('does not report a match if source hashing fails', async () => {
   try { expect(await matchQuote(request('abc', 'b'))).toMatchObject({ status: 'error', error: { code: 'EVIDENCE_FAILED' } }); }
   finally { digest.mockRestore(); }
 });
+it('retains surrounding negation rather than presenting a substring as an affirmative claim', async () => {
+  expect(await matchQuote(request('料金は未確定。', '確定'))).toMatchObject({ status: 'matched',
+    matches: [{ start: 4, end: 6, before: '料金は未', after: '。' }] });
+});
+it('bounds surrounding excerpts without splitting Unicode surrogate pairs', async () => {
+  const result = await matchQuote(request('😀'.repeat(30) + 'x根拠y' + '😀'.repeat(30), '根拠'));
+  if (!('matches' in result)) throw new Error('Expected matches');
+  for (const text of [result.matches[0].before, result.matches[0].after]) {
+    expect(text.length).toBeLessThanOrEqual(40);
+    expect([...text].some((character) => character.length === 1 && /[\ud800-\udfff]/.test(character))).toBe(false);
+  }
+});
