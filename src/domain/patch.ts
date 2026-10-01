@@ -1,3 +1,4 @@
+import { isDomainInputPath, inputPathsOverlap } from './input-path';
 import { parseJsonValue as parseJsonSnapshot, DecisionValidationError } from './decision-context';
 /**
  * Runtime-validated, copy-on-write Domain Patch operations.
@@ -236,7 +237,9 @@ function parseInputDefinitions(value: unknown, path: string): DomainPatchResult<
     if (Object.keys(item).some((key) => !allowed.has(key))) return failure(patchError('INVALID_PATCH', path + '[' + index + ']', 'Unsupported input definition field.'));
     const inputPath = nonEmptyString(item.path, path + '[' + index + '].path');
     if (isFailure(inputPath)) return inputPath;
+    if (!isDomainInputPath(inputPath.value)) return failure(patchError('INVALID_PATCH', path + '[' + index + '].path', 'Expected a dotted identifier path.'));
     if (seen.has(inputPath.value)) return failure(patchError('DUPLICATE_ID', path + '[' + index + '].path', 'Duplicate input path.'));
+    if ([...seen].some((existing) => inputPathsOverlap(existing, inputPath.value))) return failure(patchError('INVALID_SCOPE', path + '[' + index + '].path', 'A field cannot be both a scalar leaf and an object parent.'));
     if (item.type !== 'boolean' && item.type !== 'number' && item.type !== 'string') return failure(patchError('INVALID_PATCH', path + '[' + index + '].type', 'Unsupported input type.'));
     if (typeof item.required !== 'boolean') return failure(patchError('INVALID_PATCH', path + '[' + index + '].required', 'Expected a boolean.'));
     seen.add(inputPath.value);

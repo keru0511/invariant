@@ -187,3 +187,14 @@ describe('JSON values retain their meaning at the patch boundary', () => {
     expect(parseDomainPatch(value).ok).toBe(false);
   });
 });
+
+it.each([
+  { paths: ['member..age'] },
+  { paths: ['member', 'member.age'] },
+  { paths: ['member.age', 'member'] },
+])('rejects unrepresentable type field paths $paths', ({ paths }) => {
+  const value = patch([{ op: 'add_type', type: { id: 'type.invalid', name: 'Invalid',
+    fields: paths.map((path) => ({ path, type: 'number', required: true })),
+  } }]);
+  expect(parseDomainPatch(value).ok).toBe(false);
+});

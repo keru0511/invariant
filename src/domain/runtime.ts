@@ -1,3 +1,4 @@
+import { isDomainInputPath, inputPathsOverlap } from './input-path';
 import { MAX_JSON_VALUE_DEPTH } from './decision-context';
 import { compareCanonicalText } from './canonical-order';
 import { isDomainNumber } from './numeric';
@@ -336,7 +337,7 @@ function readPath(
 ): DomainParseResult<string> {
   const value = readNonEmptyString(record, key, path);
   if (isFailure(value)) return value;
-  if (!/^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$/.test(value.value)) {
+  if (!isDomainInputPath(value.value)) {
     const fieldPath = childPath(path, key);
     return failure(
       makeError(
@@ -511,6 +512,9 @@ function parseInputDefinition(
         "Input path '" + inputPath.value + "' is declared more than once.",
       ),
     );
+  }
+  if (context.inputTypes && [...context.inputTypes.keys()].some((existing) => inputPathsOverlap(existing, inputPath.value))) {
+    return failure(makeError('INVALID_SCOPE', childPath(path, 'path'), 'An input cannot be both a scalar leaf and an object parent.'));
   }
   context.inputTypes?.set(inputPath.value, inputType.value);
   return success(
