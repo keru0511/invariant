@@ -15,7 +15,10 @@
     "ci:local": "node scripts/ci-local.mjs",
     "test:ci-gate": "node scripts/ci-gate-smoke.mjs",
     "hooks:install": "node scripts/hooks-install.mjs",
-    "pr:create": "node scripts/pr-create.mjs"
+    "pr:create": "node scripts/pr-create.mjs",
+    "lab:setup": "node scripts/local-lab.mjs setup",
+    "lab:start": "node scripts/local-lab.mjs start",
+    "lab:check": "node scripts/local-lab.mjs check"
   },
   "devDependencies": {
     "@mizchi/actrun": "0.32.0",
