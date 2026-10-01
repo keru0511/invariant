@@ -192,6 +192,9 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
         if (callerCancelled) {
           throw providerError('cancelled', 'Provider request was cancelled.');
         }
+        if (timedOut || controller.signal.aborted) {
+          throw providerError('timeout', 'Provider request timed out.');
+        }
         if (!response.ok) {
           throw providerError('provider', 'Provider returned a non-success HTTP status.', response.status);
         }
@@ -199,8 +202,14 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
         try {
           payload = await response.json();
         } catch (error) {
+          if (callerCancelled) throw providerError('cancelled', 'Provider request was cancelled.');
+          if (timedOut || controller.signal.aborted || isAbortError(error)) throw providerError('timeout', 'Provider response body timed out.');
           throw providerError('malformed-output', 'Provider response was not valid JSON.');
         }
+        // Fetch completion only means headers arrived. A slow or cancellation-
+        // ignoring body reader must not turn a late candidate into success.
+        if (callerCancelled) throw providerError('cancelled', 'Provider request was cancelled.');
+        if (timedOut || controller.signal.aborted) throw providerError('timeout', 'Provider response body timed out.');
         return extractStructuredOutput(payload);
       } finally {
         clearTimeout(timer);

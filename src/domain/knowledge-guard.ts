@@ -14,7 +14,8 @@ export interface KnowledgeIssues {
  */
 export function guardKnowledge(result: EvaluationResult, issues?: KnowledgeIssues): EvaluationResult {
   if (!issues || (issues.unknowns.length === 0 && issues.conflicts.length === 0)) return result;
-  const status = result.status === 'error' ? 'error' : issues.conflicts.length > 0 ? 'conflict' : 'unresolved';
+  const status = result.status === 'error' || result.status === 'conflict' || result.status === 'ambiguous'
+    ? result.status : issues.conflicts.length > 0 ? 'conflict' : 'unresolved';
   return Object.freeze({
     ...result, status, value: null,
     errors: Object.freeze([...result.errors, Object.freeze({

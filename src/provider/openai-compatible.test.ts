@@ -187,3 +187,37 @@ it('accepts a single normal completion with a null refusal', async () => {
     fetchImpl: (async () => response({ choices: [{ finish_reason: 'stop', message: { refusal: null, parsed: output } }] })) as typeof fetch });
   await expect(provider.generate(request())).resolves.toEqual(output);
 });
+
+describe('provider response-body deadlines', () => {
+  it('does not accept a late JSON body after the provider timeout', async () => {
+    const payload = response({});
+    vi.spyOn(payload, 'json').mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { choices: [{ message: { parsed: output } }] };
+    });
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test', timeoutMs: 5,
+      fetchImpl: (async () => payload) as typeof fetch });
+    await expect(provider.generate(request())).rejects.toMatchObject({ kind: 'timeout' });
+  });
+
+  it('does not accept a JSON body after cancellation', async () => {
+    const controller = new AbortController();
+    const payload = response({});
+    vi.spyOn(payload, 'json').mockImplementation(async () => {
+      controller.abort();
+      return { choices: [{ message: { parsed: output } }] };
+    });
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+      fetchImpl: (async () => payload) as typeof fetch });
+    await expect(provider.generate({ ...request(), signal: controller.signal })).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
+  it('classifies an aborted response-body read as cancellation rather than malformed JSON', async () => {
+    const controller = new AbortController();
+    const payload = response({});
+    vi.spyOn(payload, 'json').mockImplementation(async () => { controller.abort(); throw new Error('body aborted'); });
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+      fetchImpl: (async () => payload) as typeof fetch });
+    await expect(provider.generate({ ...request(), signal: controller.signal })).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+});
