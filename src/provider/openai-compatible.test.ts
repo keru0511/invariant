@@ -160,3 +160,30 @@ describe('OpenAI-compatible conversation patch adapter', () => {
 
 
 
+
+describe('provider completion integrity', () => {
+  it.each(['length', 'content_filter', 'tool_calls', null])('does not accept JSON-shaped content from an incomplete completion (%s)', async (finish_reason) => {
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+      fetchImpl: (async () => response({ choices: [{ finish_reason, message: { parsed: output } }] })) as typeof fetch });
+    await expect(provider.generate(request())).rejects.toMatchObject({ kind: 'malformed-output' });
+  });
+
+  it('does not prefer parsed content over an explicit refusal', async () => {
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+      fetchImpl: (async () => response({ choices: [{ finish_reason: 'stop', message: { refusal: 'Refused', parsed: output } }] })) as typeof fetch });
+    await expect(provider.generate(request())).rejects.toMatchObject({ kind: 'malformed-output' });
+  });
+
+  it('rejects ambiguous multiple candidates rather than silently selecting the first', async () => {
+    const choice = { finish_reason: 'stop', message: { parsed: output } };
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+      fetchImpl: (async () => response({ choices: [choice, choice] })) as typeof fetch });
+    await expect(provider.generate(request())).rejects.toMatchObject({ kind: 'malformed-output' });
+  });
+});
+
+it('accepts a single normal completion with a null refusal', async () => {
+  const provider = createOpenAICompatibleProvider({ baseUrl: 'https://example.invalid/v1', apiKey: 'test', model: 'test',
+    fetchImpl: (async () => response({ choices: [{ finish_reason: 'stop', message: { refusal: null, parsed: output } }] })) as typeof fetch });
+  await expect(provider.generate(request())).resolves.toEqual(output);
+});
