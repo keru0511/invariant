@@ -66,3 +66,13 @@ the provider, MCP endpoint, filesystem, clock, or network.
 
 No live credentials, deployment, or paid provider call is part of normal CI or
 the issue #29 verification run.
+
+## 応答を誤って成功としないための検証
+
+評価用クライアントも、生成打ち切り・拒否・複数候補・JSON回答で要求していないtool_callsを受理しません。
+finish_reasonを返すproviderではstopのみを受理します。互換providerがこの欄を省略した場合は従来どおり受理するため、終了理由までは検証できません。
+タイムアウト後に到着した本文は、内容が正しいJSONでも成功にしません。次の通信失敗に前回の記録を流用しません。
+
+MCP側は現在の2026-07-28プロトコルとメタデータを使い、実サーバーハンドラーとの接続もテストします。
+JSON-RPCの応答ID、tool error、本文の形を検査し、エラーを評価根拠に流しません。
+これらの通常テストは通信を差し替え、実providerや課金APIを呼びません。
