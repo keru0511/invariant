@@ -270,3 +270,44 @@ describe('conversation-to-validated-patch', () => {
 });
 
 
+
+describe('immutable provider boundary', () => {
+  it('uses the original snapshot even if the caller changes it while the provider is pending', async () => {
+    const original = structuredClone(functionCatalog);
+    const turns = structuredClone(conversation);
+    let release!: (value: unknown) => void;
+    const pendingOutput = new Promise<unknown>((resolve) => { release = resolve; });
+    const provider = { generate: async () => pendingOutput };
+    const pending = generateValidatedDomainPatch({ conversation: turns, currentDomain: original,
+      currentDomainVersion: 'domain-v0', unresolvedItems: [] }, provider);
+    original.functions.length = 0;
+    turns[0].id = 'changed-after-start';
+    turns[0].content = 'A different instruction';
+    release({ patch: patch([]), operationEvidence: [] });
+    const actual = await pending;
+    expect(actual.ok).toBe(true);
+    if (actual.ok) expect(actual.dryAppliedModel.domain.functions).toHaveLength(functionCatalog.functions.length);
+  });
+
+  it('does not give the provider mutable references to caller-owned knowledge', async () => {
+    const original = structuredClone(functionCatalog);
+    const turns = structuredClone(conversation);
+    let requestSnapshot: ConversationPatchProviderRequest | undefined;
+    const actual = await generateValidatedDomainPatch({ conversation: turns, currentDomain: original,
+      currentDomainVersion: 'domain-v0', unresolvedItems: [] }, { generate: async (request) => {
+        requestSnapshot = request;
+        return { patch: patch([]), operationEvidence: [] };
+      } });
+    expect(actual.ok).toBe(true);
+    expect(requestSnapshot?.currentDomain).not.toBe(original);
+    expect(requestSnapshot?.conversation).not.toBe(turns);
+    expect(Object.isFrozen(requestSnapshot?.currentDomain)).toBe(true);
+    expect(Object.isFrozen(requestSnapshot?.conversation[0])).toBe(true);
+    expect(Object.isFrozen(original)).toBe(false);
+  });
+});
+
+ it('keeps nested provider schema immutable across requests', () => {
+   expect(Object.isFrozen(CONVERSATION_PATCH_OUTPUT_SCHEMA.properties.patch.properties.operations.items.properties.op.enum)).toBe(true);
+   expect(Object.isFrozen(CONVERSATION_PATCH_OUTPUT_SCHEMA.properties.operationEvidence.items.required)).toBe(true);
+ });

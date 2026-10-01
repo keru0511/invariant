@@ -37,6 +37,27 @@ INSERT OR IGNORE INTO workspace_memberships VALUES ('${WORKSPACE}', 'test-bypass
 INSERT OR IGNORE INTO domain_versions (workspace_id, domain_id, version_id, model_json, published_at)
 VALUES ('${WORKSPACE}', '${DOMAIN}', ${sqlString(version)}, ${sqlString(JSON.stringify(catalog))}, 'local-fixture');\n`;
 }
+export function knowledgeSeedSql(catalog, version) {
+  const domain = DOMAIN + '-knowledge';
+  let sql = `INSERT OR IGNORE INTO domains VALUES ('${WORKSPACE}', '${domain}', 'Synthetic reliability guard', 'local-fixture');
+INSERT OR IGNORE INTO domain_versions (workspace_id, domain_id, version_id, model_json, published_at)
+VALUES ('${WORKSPACE}', '${domain}', ${sqlString(version)}, ${sqlString(JSON.stringify(catalog))}, 'local-fixture');\n`;
+  for (const kind of ['unknown', 'conflict']) {
+    const target = version + '-' + kind;
+    const model = { contractVersion: 'domain-v0', kind: 'domain-model', version: target, domain: catalog,
+      types: [], examples: [],
+      unknowns: kind === 'unknown' ? [{ id: 'unknown.scope', kind: 'unknown', subject: 'scope', description: 'Scope is unspecified' }] : [],
+      conflicts: kind === 'conflict' ? [{ id: 'conflict.scope', kind: 'conflict', subject: 'scope', alternatives: ['local', 'global'] }] : [],
+    };
+    // Synthetic storage fixtures, not an assertion that a user approved a real proposal.
+    sql += `INSERT OR IGNORE INTO domain_proposals
+(workspace_id, domain_id, proposal_id, principal_id, base_version, version_id, review_digest, review_json, model_json, authoring_json, created_at)
+VALUES ('${WORKSPACE}', '${domain}', ${sqlString(target)}, 'test-bypass', ${sqlString(version)}, ${sqlString(target)}, '${'0'.repeat(64)}', '{}', ${sqlString(JSON.stringify(catalog))}, ${sqlString(JSON.stringify(model))}, 'local-fixture');
+INSERT OR IGNORE INTO domain_versions (workspace_id, domain_id, version_id, model_json, published_at, proposal_id)
+VALUES ('${WORKSPACE}', '${domain}', ${sqlString(target)}, ${sqlString(JSON.stringify(catalog))}, 'local-fixture', ${sqlString(target)});\n`;
+  }
+  return sql;
+}
 export function localConfig(runId) {
   return {
     name: 'invariant-local-lab', main: './entry.ts', compatibility_date: '2024-12-01',
@@ -101,7 +122,7 @@ export default { async fetch(request, env, ctx) {
   headers.set('x-invariant-local-lab', env.LAB_RUN_ID);
   return new Response(response.body, {status:response.status, headers});
 } };\n`);
-  await writeFile(join(LAB, 'seed.sql'), seedSql(catalog, version));
+  await writeFile(join(LAB, 'seed.sql'), seedSql(catalog, version) + knowledgeSeedSql(catalog, version));
   const common = ['--local', '--config', CONFIG, '--persist-to', STATE];
   await wrangler(['d1', 'migrations', 'apply', 'DB', ...common]);
   await wrangler(['d1', 'execute', 'DB', ...common, '--file', join(LAB, 'seed.sql')]);
@@ -179,6 +200,29 @@ export async function evaluateCases(context, baseUrl, call = mcp) {
   }
   return cases;
 }
+export async function evaluateReliabilityCases(context, baseUrl, call = mcp) {
+  const identity = { workspace: WORKSPACE, domain: DOMAIN, version: context.version, function: 'member-age' };
+  const definitions = [
+    { id: 'knowledge-unknown', args: { ...identity, domain: DOMAIN + '-knowledge', version: context.version + '-unknown', args: { user: { age: 20 } } }, status: 'unresolved', code: 'DOMAIN_KNOWLEDGE_INCOMPLETE' },
+    { id: 'knowledge-conflict', args: { ...identity, domain: DOMAIN + '-knowledge', version: context.version + '-conflict', args: { user: { age: 20 } } }, status: 'conflict', code: 'DOMAIN_KNOWLEDGE_INCOMPLETE' },
+    { id: 'missing-fact', args: { ...identity, args: {} }, status: 'unresolved', code: 'MISSING_INPUT' },
+    { id: 'invented-function', args: { ...identity, function: 'not-declared', args: {} }, status: 'error', code: 'INVALID_FUNCTION' },
+    { id: 'numeric-overflow', args: { ...identity, args: { user: { age: 1234567 } } }, status: 'error', code: 'INVALID_ARGS', overflow: true },
+  ];
+  const cases = [];
+  for (const item of definitions) {
+    try {
+      const fetchImpl = item.overflow ? (url, init) => fetch(url, { ...init, body: init.body.replace('1234567', '1e999') }) : fetch;
+      const actual = await call(baseUrl, 'domain.evaluate', item.args, context.runId, fetchImpl);
+      const repeated = await call(baseUrl, 'domain.evaluate', item.args, context.runId, fetchImpl);
+      const expected = { status: item.status, value: null, code: item.code, hasDecision: false };
+      const observed = { status: actual.status, value: actual.value, code: actual.errors?.find((e) => e.code === item.code)?.code, hasDecision: Object.hasOwn(actual, 'decision') };
+      const deterministic = JSON.stringify(actual) === JSON.stringify(repeated);
+      cases.push({ id: item.id, passed: deterministic && JSON.stringify(expected) === JSON.stringify(observed), deterministic, expected, actual: observed });
+    } catch (error) { cases.push({ id: item.id, passed: false, error: error.message }); }
+  }
+  return cases;
+}
 async function ready(baseUrl, child, runId) {
   for (let attempt = 0; attempt < 120; attempt++) {
     if (child.exitCode !== null || child.signalCode !== null) throw new Error('開発サーバーが起動前に終了しました');
@@ -240,7 +284,7 @@ export async function run(mode) {
     if (!schema.ok || !valid.valid || !search.ok || search.results.length !== context.catalog.functions.length) throw new Error('保存済みドメインの参照検証に失敗');
     const foreign = await mcp(baseUrl, 'domain.describe', { ...identity, workspace: 'foreign-workspace' }, context.runId);
     if (foreign.errors?.[0]?.code !== 'RESOURCE_NOT_FOUND') throw new Error('ワークスペース分離の検証に失敗');
-    report.cases = await evaluateCases(context, baseUrl);
+    report.cases = [...await evaluateCases(context, baseUrl), ...await evaluateReliabilityCases(context, baseUrl)];
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }
   finally {

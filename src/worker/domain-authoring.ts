@@ -59,6 +59,7 @@ export async function proposeDomain(
   input: z.infer<typeof proposeInputSchema>, principal: AccessPrincipal, dependencies: AuthoringDependencies,
 ) {
   try {
+    input = proposeInputSchema.parse(input);
     // Authorize and load before calling the paid/external provider.
     const workspace = await dependencies.repository.forPrincipal(principal, input.workspace);
     const record = await workspace.loadVersion({ domainId: input.domain, versionId: input.baseVersion });

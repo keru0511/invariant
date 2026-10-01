@@ -108,6 +108,8 @@ describe('reviewed domain authoring', () => {
     expect(evaluated.value).toBeNull();
     expect(evaluated.errors[0].code).toBe('DOMAIN_KNOWLEDGE_INCOMPLETE');
     expect(evaluated.knowledgeIssues.unknowns[0].id).toBe('unknown.country');
+    const described = (await call('domain.describe', { workspace: 'w', domain: 'd', version: committed.version }, s)).value;
+    expect(described.knowledgeIssues).toEqual(evaluated.knowledgeIssues);
     expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd' })).toBe(committed.version);
   });
 
@@ -310,5 +312,25 @@ describe('published knowledge cannot silently become certainty', () => {
     expect(result.errors[0].code).toBe('STORAGE_FAILURE');
     expect(result.value).toBeNull();
     expect(result.decision).toBeUndefined();
+  });
+});
+
+describe('review evidence snapshot', () => {
+  it('keeps review excerpts identical to the conversation sent for generation', async () => {
+    let release;
+    let observed;
+    const ready = new Promise((resolve) => { release = resolve; });
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    const s = await setup(async (req) => { observed = req; entered(); await ready; return output(req); });
+    const mutable = structuredClone(input);
+    const pending = proposeDomain(mutable, principal, s.dependencies);
+    await started;
+    mutable.conversation[0].content = 'Changed while waiting for the provider';
+    release();
+    const proposed = await pending;
+    expect(proposed.status).toBe('proposed');
+    expect(proposed.review.sources).toEqual(observed.conversation);
+    expect(proposed.review.sources[0].content).toBe(input.conversation[0].content);
   });
 });

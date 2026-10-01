@@ -167,6 +167,7 @@ type LoadedDomainVersion =
   | { readonly ok: false; readonly result: DomainResourceError };
 
 export interface DomainDescribeResult {
+  readonly knowledgeIssues?: DomainVersionRecord['knowledgeIssues'];
   readonly status: 'ok' | 'error';
   readonly ok: boolean;
   readonly workspace: string;
@@ -349,6 +350,7 @@ async function describeStoredDomain(
       contractVersion: parsed.value.contractVersion,
       kind: parsed.value.kind,
       functions,
+      ...(loaded.record.knowledgeIssues ? { knowledgeIssues: loaded.record.knowledgeIssues } : {}),
       errors: [],
     };
   }
@@ -371,6 +373,7 @@ async function describeStoredDomain(
     kind: parsed.value.kind,
     functions: Object.freeze([selectedFunction]),
     function: selectedFunction,
+    ...(loaded.record.knowledgeIssues ? { knowledgeIssues: loaded.record.knowledgeIssues } : {}),
     errors: [],
   };
 }

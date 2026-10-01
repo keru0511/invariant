@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localEnvironment, localConfig, devArguments, seedSql, sqlString, comparable, mcp, evaluateCases, acquireLock, ROOT } from './local-lab.mjs';
+import { localEnvironment, localConfig, devArguments, seedSql, sqlString, comparable, mcp, evaluateCases, evaluateReliabilityCases, knowledgeSeedSql, acquireLock, ROOT } from './local-lab.mjs';
 
 describe('ローカルMCP検証環境', () => {
   it('本番の資格情報やリモート設定を子プロセスへ引き継がない', () => {
@@ -63,3 +63,16 @@ describe('ローカルMCP検証環境', () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });
+
+ it('records every reliability case as failed when transport is unavailable', async () => {
+   const cases = await evaluateReliabilityCases({ version: 'v', runId: 'ours' }, 'http://127.0.0.1:8787', async () => { throw new Error('offline'); });
+   expect(cases).toHaveLength(5);
+   expect(cases.every((item) => !item.passed && item.error === 'offline')).toBe(true);
+ });
+ it('seeds distinct immutable unknown/conflict snapshots with matching publication markers', () => {
+   const sql = knowledgeSeedSql({ functions: [] }, 'v1');
+   expect(sql).toContain('domain_proposals');
+   expect(sql).toContain('v1-unknown');
+   expect(sql).toContain('v1-conflict');
+   expect(sql).not.toMatch(/DELETE|REPLACE|UPDATE/);
+ });
