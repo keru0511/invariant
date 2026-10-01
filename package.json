@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:calculation-mutations": "python3 scripts/calculation-mutations.py",
     "eval:live": "vite-node --script scripts/live-evaluation.ts",
     "eval:live:smoke": "vite-node --script scripts/live-evaluation.ts --trials 1",
     "eval:live:large": "vite-node --script scripts/live-evaluation.ts --trials 10",
