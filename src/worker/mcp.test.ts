@@ -1016,3 +1016,18 @@ it('exposes the grounded-answer workflow during modern server discovery', async 
   expect(body.result.instructions).toContain('unresolved, ambiguous, conflict, or error');
   expect(body.result.instructions).toContain('explicit human approval');
 });
+
+it('provides exact arithmetic through MCP without using storage or a provider', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.evaluate', params: {
+    name: 'calculation.evaluate', arguments: { version: 'calculation-v1', operation: 'add', left: '0.1', right: '0.2' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'ok', functionId: 'decimal.add@1',
+    result: { numerator: '3', denominator: '10', decimal: '0.3' }, scope: 'arithmetic_for_supplied_inputs' });
+});
+
+it('does not turn a zero baseline into a made-up percentage through MCP', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.evaluate', params: {
+    name: 'calculation.evaluate', arguments: { version: 'calculation-v1', operation: 'percentage_change', from: '0', to: '10' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'error', error: { code: 'INVALID_BASELINE' } });
+});

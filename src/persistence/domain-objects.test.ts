@@ -17,6 +17,7 @@ it('shares identical model content across history IDs without losing knowledge m
   const second = await packModel({ ...model, version: 'v2' });
   expect(second.hash).toBe(first.hash);
   expect(second.objects).toEqual(first.objects);
+  expect(first.objects.map((entry) => entry.hash)).toEqual(first.objects.map((entry) => entry.hash).sort());
   const resolved = await packModel({ ...model, version: 'v3', unknowns: [] });
   expect(resolved.catalogPointer).toBe(first.catalogPointer);
   expect(resolved.hash).not.toBe(first.hash);

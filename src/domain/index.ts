@@ -38,3 +38,5 @@ export * from './evaluation';
 export * from './evaluation-fixtures';
 export * from './decision';
 export * from './live-evaluation';
+
+export * from './calculation';

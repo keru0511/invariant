@@ -50,7 +50,7 @@ npm run hooks:install
 ## ローカルMCPでの動作検証
 
 `npm run lab:check` で、ローカルD1の準備・開発サーバー起動・HTTP/MCP経由の
-15ケース検証・結果保存・終了をまとめて実行できます。有料LLMは呼び出しません。
+20ケース検証・結果保存・終了をまとめて実行できます。有料LLMは呼び出しません。
 使い方と安全上の制約は [ローカルMCP検証環境](docs/local-lab.md) を参照してください。
 
 ## 会話からルール案を作成・承認
@@ -73,3 +73,8 @@ npm run hooks:install
 
 新しい版は内容ハッシュでルール・関数・型などを共有し、ドメインごとの親版と現行版を管理します。
 移行方法・互換性・保存量の検証は[内容アドレス型版管理](docs/domain-version-storage.md)を参照してください。
+
+## 正確な計算関数
+
+`calculation.describe` / `calculation.evaluate`で、小数文字列を有理数として正確に計算します。
+使い方、丸めと正確な値の区別、独立した正解による検証は[計算関数](docs/calculation-functions.md)を参照してください。

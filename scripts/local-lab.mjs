@@ -289,9 +289,29 @@ export async function run(mode) {
     report.cases = [...await evaluateCases(context, baseUrl), ...await evaluateReliabilityCases(context, baseUrl)];
     for (const [suffix, decision, parent] of [['1', 'allow', null], ['2', 'deny', context.version + '-cas-1']]) {
       const actual = await mcp(baseUrl, 'domain.evaluate', { ...identity, domain: 'demo-cas', version: context.version + '-cas-' + suffix, function: 'member-age', args: { user: { age: 20 } } }, context.runId);
-      report.cases.push({ id: 'cas-history-' + suffix, passed: actual.status === 'resolved' && actual.decision === decision
+      const repeated = await mcp(baseUrl, 'domain.evaluate', { ...identity, domain: 'demo-cas', version: context.version + '-cas-' + suffix, function: 'member-age', args: { user: { age: 20 } } }, context.runId);
+      report.cases.push({ id: 'cas-history-' + suffix, passed: JSON.stringify(actual) === JSON.stringify(repeated) && actual.status === 'resolved' && actual.decision === decision
         && /^[a-f0-9]{64}$/.test(actual.snapshot?.contentHash ?? '') && actual.snapshot.parentVersionId === parent,
         expected: { decision, parentVersionId: parent }, actual: { decision: actual.decision, snapshot: actual.snapshot } });
+    }
+    const calculator = await mcp(baseUrl, 'calculation.describe', {}, context.runId);
+    if (calculator.version !== 'calculation-v1' || calculator.functions.length !== 6) throw new Error('計算関数一覧の確認に失敗');
+    for (const entry of [
+      { id: 'decimal-add', input: { operation: 'add', left: '0.1', right: '0.2' }, expected: { status: 'ok', decimal: '0.3' } },
+      { id: 'exact-fraction', input: { operation: 'divide', left: '1', right: '3', decimalPlaces: 4 }, expected: { status: 'ok', decimal: null, display: '0.3333', displayExact: false } },
+      { id: 'percentage-amount', input: { operation: 'percentage_of', amount: '250', percent: '12.5' }, expected: { status: 'ok', decimal: '31.25' } },
+      { id: 'zero-baseline', input: { operation: 'percentage_change', from: '0', to: '10' }, expected: { status: 'error', error: 'INVALID_BASELINE' } },
+      { id: 'missing-calculation-input', input: { operation: 'add', left: '1' }, expected: { status: 'error', error: 'MISSING_INPUT' } },
+    ]) {
+      const args = { version: 'calculation-v1', ...entry.input };
+      const actual = await mcp(baseUrl, 'calculation.evaluate', args, context.runId);
+      const repeated = await mcp(baseUrl, 'calculation.evaluate', args, context.runId);
+      const observed = { status: actual.status, decimal: actual.result?.decimal, display: actual.display?.value,
+        displayExact: actual.display?.exact, error: actual.error?.code };
+      // Compare only explicitly expected fields; full responses must also repeat exactly.
+      const passed = Object.entries(entry.expected).every(([key, value]) => observed[key] === value)
+        && JSON.stringify(actual) === JSON.stringify(repeated);
+      report.cases.push({ id: entry.id, passed, expected: entry.expected, actual: observed });
     }
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }

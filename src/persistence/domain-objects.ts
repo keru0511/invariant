@@ -33,6 +33,10 @@ function pointer(kind: SnapshotPointer['kind'], hash: string): string { return J
 
 class Builder {
   readonly objects = new Map<string, StoredObject>();
+  entries(): StoredObject[] {
+    // Digest promises may finish in any order; exported batches must not depend on timing.
+    return [...this.objects.values()].sort((a, b) => a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+  }
   async add(kind: string, value: unknown): Promise<string> {
     const payload = stableJsonStringify({ format: FORMAT, kind, value } as JsonValue);
     const hash = await contentHash(payload);
@@ -53,7 +57,7 @@ class Builder {
 export async function packCatalog(value: unknown) {
   const parsed = parseDomain(value); if (!parsed.ok) return bad();
   const builder = new Builder(); const hash = await builder.catalog(parsed.value);
-  return { hash, catalogPointer: pointer('catalog', hash), objects: [...builder.objects.values()] };
+  return { hash, catalogPointer: pointer('catalog', hash), objects: builder.entries() };
 }
 export async function packModel(value: unknown) {
   const parsed = parseDomainModel(value); if (!parsed.ok) return bad();
@@ -66,7 +70,7 @@ export async function packModel(value: unknown) {
     unknowns: await Promise.all(unknowns.map((item) => builder.add('unknown', item))),
     conflicts: await Promise.all(conflicts.map((item) => builder.add('conflict', item))),
   });
-  return { hash, catalogPointer: pointer('catalog', catalogHash), modelPointer: pointer('model', hash), objects: [...builder.objects.values()] };
+  return { hash, catalogPointer: pointer('catalog', catalogHash), modelPointer: pointer('model', hash), objects: builder.entries() };
 }
 export function objectStatements(db: D1DatabaseLike, scope: ObjectScope, entries: readonly StoredObject[]) {
   const statements = [];

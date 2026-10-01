@@ -1,3 +1,4 @@
+import { calculate, CALCULATION_SOURCE_HASH, CALCULATION_VERSION, CALCULATION_FUNCTIONS, MAX_DECIMAL_DIGITS, MAX_DECIMAL_PLACES } from '../domain/calculation';
 import { guardKnowledge } from '../domain/knowledge-guard';
 import { proposeInputSchema, commitInputSchema, proposeDomain, commitDomain, productionAuthoringDependencies, authoringFailure, type AuthoringDependencies } from './domain-authoring';
 import {
@@ -42,6 +43,7 @@ const ALLOWED_ORIGIN_HOSTNAMES = localhostAllowedOrigins();
 
 export const INVARIANT_USAGE_INSTRUCTIONS = [
   'Invariant evaluates explicitly encoded rules; it is not a general factual-truth oracle.',
+  'For arithmetic, use calculation.describe and calculation.evaluate with explicit version and decimal strings. Do not estimate the result yourself. Keep exact fractions separate from rounded display values; the tool does not verify real-world input facts.',
   'For a domain-backed answer: search authorized domains, distinguish current from historical versions, describe the exact function, then evaluate that same explicit workspace/domain/version with known inputs.',
   'Never invent input facts, substitute a similar function, or treat descriptions and search hits as evaluated evidence. Ask for missing facts or abstain when no applicable domain is established.',
   'Only resolved permits an allow/deny statement, conditional on the supplied facts and the selected version. Cite that version and the returned rule/provenance identifiers. Do not generalize beyond that scope.',
@@ -621,6 +623,27 @@ function createMcpServer(
     name: 'invariant-mcp',
     version: '0.0.1',
   }, { instructions: INVARIANT_USAGE_INSTRUCTIONS });
+
+  server.registerTool('calculation.describe', {
+    description: 'Describe exact arithmetic functions, their parameter names, formulas, constraints, and version. No facts are inferred.',
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  }, async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ version: CALCULATION_VERSION, implementationHash: CALCULATION_SOURCE_HASH,
+    maxDecimalDigits: MAX_DECIMAL_DIGITS, maxDecimalPlaces: MAX_DECIMAL_PLACES, functions: CALCULATION_FUNCTIONS,
+    scope: 'arithmetic_for_supplied_inputs', notes: ['Use strings for decimal inputs.', 'Unit conversions and real-world fact verification are not performed.'] }) }] }));
+  const decimalInput = z.string().max(MAX_DECIMAL_DIGITS + 2);
+  server.registerTool('calculation.evaluate', {
+    description: 'Calculate using exact rational arithmetic. Select calculation-v1. add/subtract/multiply/divide require left and right; percentage_of requires amount and percent; percentage_change requires from and to, with from > 0. Supply only the selected operation parameters, as decimal strings. Optional decimalPlaces uses explicit half-even rounding. A null decimal means the exact fraction repeats, not zero or failure. Do not invent inputs or claim their factual correctness.',
+    inputSchema: z.object({ version: z.literal(CALCULATION_VERSION), implementationHash: z.literal(CALCULATION_SOURCE_HASH).optional(),
+      operation: z.enum(['add', 'subtract', 'multiply', 'divide', 'percentage_of', 'percentage_change']),
+      left: decimalInput.optional(), right: decimalInput.optional(), amount: decimalInput.optional(),
+      percent: decimalInput.optional(), from: decimalInput.optional(), to: decimalInput.optional(),
+      decimalPlaces: z.number().int().min(0).max(MAX_DECIMAL_PLACES).optional(),
+    }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  }, async (input) => {
+    const result = calculate(input);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], isError: result.status === 'error' };
+  });
 
   server.registerTool(
     'domain.ping',
