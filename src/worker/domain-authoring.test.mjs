@@ -98,6 +98,8 @@ describe('reviewed domain authoring', () => {
     expect(proposed.requiresConfirmation).toBe(true);
     expect(proposed.review.sources).toEqual(input.conversation);
     expect(proposed.review.unknowns).toHaveLength(1);
+    expect(proposed.review.coverage.storedExampleStatus).toBe('empty');
+    expect(proposed.review.coverage.functionsWithoutStoredExamples.length).toBe(catalog.functions.length);
     expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_versions').get().n).toBe(1);
     const before = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
     expect(before.decision).toBe('allow');
@@ -450,4 +452,16 @@ it('does not expose mutable cached search headers', async () => {
   expect(Object.isFrozen(headers[0])).toBe(true);
   expect(Reflect.set(headers[0], 'name', 'forged')).toBe(false);
   expect(await reader.readCatalog(serialized)).toEqual(catalog);
+});
+
+it('rejects a generated rule that contradicts a stored example without publishing', async () => {
+  const s = await setup();
+  const example = JSON.parse(readFileSync(new URL('../../fixtures/domain-v0/cases/member-age-boundary.json', import.meta.url), 'utf8'));
+  const stored = { contractVersion: 'domain-v0', kind: 'domain-model', version: 'v1', domain: catalog,
+    types: [], examples: [example], unknowns: [], conflicts: [] };
+  vi.spyOn(s.proposals, 'authoringModel').mockResolvedValue(stored);
+  const proposed = await proposeDomain(input, principal, s.dependencies);
+  expect(proposed.status).toBe('error');
+  expect(s.sqlite.prepare('SELECT COUNT(*) AS count FROM domain_proposals').get().count).toBe(0);
+  expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd', principalId: 'alice' })).toBe('v1');
 });
