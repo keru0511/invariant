@@ -1,3 +1,4 @@
+import { DomainObjectReader } from '../persistence/domain-objects';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
@@ -25,7 +26,7 @@ function database() {
   const sqlite = new DatabaseSync(':memory:');
   databases.push(sqlite);
   sqlite.exec('PRAGMA foreign_keys = ON');
-  for (const file of ['0001_domain_persistence.sql', '0002_workspace_memberships.sql', '0003_domain_proposals.sql']) {
+  for (const file of ['0001_domain_persistence.sql', '0002_workspace_memberships.sql', '0003_domain_proposals.sql', '0004_content_addressed_domains.sql']) {
     sqlite.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'));
   }
   const prepare = (sql, values = []) => ({
@@ -103,6 +104,8 @@ describe('reviewed domain authoring', () => {
     const committed = (await call('domain.commit', confirmation(proposed), s)).value;
     expect(committed.status).toBe('committed');
     const evaluated = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version, function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(evaluated.snapshot.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(evaluated.snapshot.parentVersionId).toBe('v1');
     expect(evaluated.status).toBe('unresolved');
     expect(evaluated.decision).toBeUndefined();
     expect(evaluated.value).toBeNull();
@@ -358,4 +361,93 @@ it('marks a historical-only search hit as historical instead of claiming it is c
   expect(search.results[0]).toMatchObject({ versionId: 'v1', isCurrentVersion: false });
   const old = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
   expect(old.decision).toBe('allow'); // Historical replay remains explicitly supported.
+});
+
+describe('Git-inspired per-domain content storage', () => {
+  it('shares identical snapshots while retaining distinct history and parent links', async () => {
+    const s = await setup();
+    const before = s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: catalog });
+    expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n).toBe(before);
+    const first = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' });
+    const second = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2' });
+    expect(first.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.contentHash).toBe(first.contentHash);
+    expect(first.parentVersionId).toBeNull();
+    expect(second.parentVersionId).toBe('v1');
+    expect(first.model).toEqual(second.model);
+  });
+
+  it('stores only the changed rule and its parent objects and leaves past versions reproducible', async () => {
+    const s = await setup();
+    const count = () => s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    const before = count();
+    const changed = structuredClone(catalog);
+    changed.functions[0].policy.rules[0].priority = 101;
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: changed });
+    expect(count() - before).toBe(3); // Rule, function tree, catalog tree.
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).model).toEqual(catalog);
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2' })).model).toEqual(changed);
+  });
+
+  it('keeps object resolution and version histories within the selected domain', async () => {
+    const s = await setup();
+    const other = structuredClone(catalog); other.functions[0].description = 'Other domain only';
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'other', versionId: 'v1', model: other });
+    const foreignPointer = s.sqlite.prepare("SELECT model_json FROM domain_versions WHERE domain_id = 'other'").get().model_json;
+    s.sqlite.prepare("UPDATE domain_versions SET model_json = ? WHERE domain_id = 'd'").run(foreignPointer);
+    await expect(s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).rejects.toMatchObject({ code: 'CORRUPT_VERSION' });
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'other', versionId: 'v1' })).model).toEqual(other);
+  });
+
+  it('rejects missing or modified content-addressed objects', async () => {
+    const s = await setup();
+    const root = JSON.parse(s.sqlite.prepare('SELECT model_json FROM domain_versions').get().model_json).hash;
+    s.sqlite.prepare('UPDATE domain_objects SET payload_json = ? WHERE object_hash = ?').run('{}', root);
+    await expect(s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).rejects.toMatchObject({ code: 'CORRUPT_VERSION' });
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('error'); expect(result.value).toBeNull();
+  });
+
+  it('rolls back new shared objects when publication fails', async () => {
+    const s = await setup();
+    const before = s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    s.sqlite.exec("CREATE TRIGGER fail_version BEFORE INSERT ON domain_versions WHEN NEW.version_id = 'broken' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;");
+    const changed = structuredClone(catalog); changed.functions[0].description = 'New content';
+    await expect(s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'broken', model: changed })).rejects.toBeDefined();
+    expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n).toBe(before);
+    expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd' })).toBe('v1');
+  });
+
+  it('reads inline legacy snapshots after the additive migration', async () => {
+    const s = await setup();
+    s.sqlite.prepare('INSERT INTO domain_versions (workspace_id,domain_id,version_id,model_json,published_at) VALUES (?,?,?,?,?)')
+      .run('w', 'd', 'legacy-inline', JSON.stringify(catalog), 'legacy');
+    const loaded = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'legacy-inline' });
+    expect(loaded.model).toEqual(catalog); expect(loaded.contentHash).toBeUndefined();
+  });
+
+  it('reduces stored JSON bytes for a twenty-version history of small rule changes', async () => {
+    const s = await setup();
+    let oldBytes = Buffer.byteLength(JSON.stringify(catalog));
+    for (let index = 2; index <= 20; index++) {
+      const changed = structuredClone(catalog); changed.functions[0].policy.rules[0].priority = 100 + index;
+      oldBytes += Buffer.byteLength(JSON.stringify(changed));
+      await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: `v${index}`, model: changed });
+    }
+    const objects = s.sqlite.prepare('SELECT SUM(length(CAST(payload_json AS BLOB))) n FROM domain_objects').get().n;
+    const pointers = s.sqlite.prepare('SELECT SUM(length(CAST(model_json AS BLOB))) n FROM domain_versions').get().n;
+    expect(objects + pointers).toBeLessThan(oldBytes * 0.6);
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).model).toEqual(catalog);
+  });
+});
+
+it('does not expose mutable cached search headers', async () => {
+  const s = await setup();
+  const serialized = s.sqlite.prepare('SELECT model_json FROM domain_versions').get().model_json;
+  const reader = new DomainObjectReader(s.db, { workspaceId: 'w', domainId: 'd' });
+  const headers = await reader.catalogIndex(serialized);
+  expect(Object.isFrozen(headers[0])).toBe(true);
+  expect(Reflect.set(headers[0], 'name', 'forged')).toBe(false);
+  expect(await reader.readCatalog(serialized)).toEqual(catalog);
 });

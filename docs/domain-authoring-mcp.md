@@ -11,7 +11,7 @@ Conversation entries contain `id`, `role` (`user` or `assistant`), and `content`
 The base must be the domain's current head. Membership is checked before model
 access or the external provider call. Configure the provider using
 [the provider environment settings](conversation-provider.md); D1 needs all
-three migrations, including `0003_domain_proposals.sql`.
+four migrations, including `0004_content_addressed_domains.sql`.
 
 ## Review protocol
 
@@ -82,3 +82,9 @@ D1 test is part of ordinary tests. Live-provider quality, production smoke,
 provider rate/cost controls, proposal expiration/cleanup and a dedicated review
 UI remain separate work. Proposals retain referenced conversation excerpts;
 apply appropriate retention/access policies before production use.
+
+## 内容アドレス型保存
+
+新しい提案と公開版では、ルール本体を重複保存せず共有オブジェクトへの参照を保存します。
+履歴IDと内容ハッシュは区別し、公開時に親版を記録します。
+旧形式の読み取りも維持します。詳細は[ドメイン版管理](domain-version-storage.md)を参照してください。

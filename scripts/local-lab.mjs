@@ -122,7 +122,9 @@ export default { async fetch(request, env, ctx) {
   headers.set('x-invariant-local-lab', env.LAB_RUN_ID);
   return new Response(response.body, {status:response.status, headers});
 } };\n`);
-  await writeFile(join(LAB, 'seed.sql'), seedSql(catalog, version) + knowledgeSeedSql(catalog, version));
+  const casSql = execFileSync(process.execPath, [join(ROOT, 'node_modules/vite-node/vite-node.mjs'), '--script', join(ROOT, 'scripts/local-cas-seed.ts'), version],
+    { cwd: ROOT, env: localEnvironment(), encoding: 'utf8', timeout: 60_000, maxBuffer: 4_000_000 });
+  await writeFile(join(LAB, 'seed.sql'), seedSql(catalog, version) + knowledgeSeedSql(catalog, version) + casSql);
   const common = ['--local', '--config', CONFIG, '--persist-to', STATE];
   await wrangler(['d1', 'migrations', 'apply', 'DB', ...common]);
   await wrangler(['d1', 'execute', 'DB', ...common, '--file', join(LAB, 'seed.sql')]);
@@ -285,6 +287,12 @@ export async function run(mode) {
     const foreign = await mcp(baseUrl, 'domain.describe', { ...identity, workspace: 'foreign-workspace' }, context.runId);
     if (foreign.errors?.[0]?.code !== 'RESOURCE_NOT_FOUND') throw new Error('ワークスペース分離の検証に失敗');
     report.cases = [...await evaluateCases(context, baseUrl), ...await evaluateReliabilityCases(context, baseUrl)];
+    for (const [suffix, decision, parent] of [['1', 'allow', null], ['2', 'deny', context.version + '-cas-1']]) {
+      const actual = await mcp(baseUrl, 'domain.evaluate', { ...identity, domain: 'demo-cas', version: context.version + '-cas-' + suffix, function: 'member-age', args: { user: { age: 20 } } }, context.runId);
+      report.cases.push({ id: 'cas-history-' + suffix, passed: actual.status === 'resolved' && actual.decision === decision
+        && /^[a-f0-9]{64}$/.test(actual.snapshot?.contentHash ?? '') && actual.snapshot.parentVersionId === parent,
+        expected: { decision, parentVersionId: parent }, actual: { decision: actual.decision, snapshot: actual.snapshot } });
+    }
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }
   finally {

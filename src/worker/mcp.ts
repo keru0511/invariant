@@ -133,7 +133,10 @@ interface DomainEvaluateError {
   readonly ruleIds?: readonly string[];
 }
 
+interface SnapshotIdentity { readonly contentHash: string; readonly parentVersionId: string | null; }
+
 export interface DomainEvaluateResult {
+  readonly snapshot?: SnapshotIdentity;
   readonly status: DomainEvaluateStatus;
   readonly decision?: 'allow' | 'deny';
   readonly value: boolean | null;
@@ -177,6 +180,7 @@ type LoadedDomainVersion =
   | { readonly ok: false; readonly result: DomainResourceError };
 
 export interface DomainDescribeResult {
+  readonly snapshot?: SnapshotIdentity;
   readonly knowledgeIssues?: DomainVersionRecord['knowledgeIssues'];
   readonly status: 'ok' | 'error';
   readonly ok: boolean;
@@ -361,6 +365,7 @@ async function describeStoredDomain(
       kind: parsed.value.kind,
       functions,
       ...(loaded.record.knowledgeIssues ? { knowledgeIssues: loaded.record.knowledgeIssues } : {}),
+      ...(loaded.record.contentHash ? { snapshot: { contentHash: loaded.record.contentHash, parentVersionId: loaded.record.parentVersionId ?? null } } : {}),
       errors: [],
     };
   }
@@ -384,6 +389,7 @@ async function describeStoredDomain(
     functions: Object.freeze([selectedFunction]),
     function: selectedFunction,
     ...(loaded.record.knowledgeIssues ? { knowledgeIssues: loaded.record.knowledgeIssues } : {}),
+    ...(loaded.record.contentHash ? { snapshot: { contentHash: loaded.record.contentHash, parentVersionId: loaded.record.parentVersionId ?? null } } : {}),
     errors: [],
   };
 }
@@ -579,7 +585,9 @@ async function evaluateStoredDomain(
     const evaluated = evaluationResult(input, guardKnowledge(
       evaluate(record.model, input.function, input.args), record.knowledgeIssues,
     ));
-    return { ...evaluated, ...(record.knowledgeIssues ? { knowledgeIssues: record.knowledgeIssues } : {}) };
+    return { ...evaluated, ...(record.knowledgeIssues ? { knowledgeIssues: record.knowledgeIssues } : {}),
+      ...(record.contentHash ? { snapshot: { contentHash: record.contentHash, parentVersionId: record.parentVersionId ?? null } } : {}),
+    };
   } catch (error) {
     if (error instanceof WorkspaceAccessError) {
       return errorResult(input, PUBLIC_RESOURCE_NOT_FOUND, 'Resource not found.');
