@@ -330,6 +330,13 @@ export async function run(mode) {
       report.cases.push({ id: 'quote-' + expected, passed: actual.status === expected
         && actual.scope === 'literal_quote_in_supplied_text' && JSON.stringify(actual) === JSON.stringify(repeated), expected, actual: actual.status });
     }
+    const boundedQuote = { version: 'quote-evidence-v1', source: { id: 'synthetic-max-source', version: 'v1', text: '根'.repeat(100000) }, quote: '根'.repeat(10000) };
+    const boundedActual = await mcp(baseUrl, 'evidence.match_quote', boundedQuote, context.runId);
+    const boundedRepeated = await mcp(baseUrl, 'evidence.match_quote', boundedQuote, context.runId);
+    report.cases.push({ id: 'quote-max-bounds', passed: boundedActual.status === 'matched' && boundedActual.truncated === true
+      && boundedActual.matches.length === 20 && JSON.stringify(boundedActual) === JSON.stringify(boundedRepeated),
+      expected: { status: 'matched', matchCount: 20, truncated: true },
+      actual: { status: boundedActual.status, matchCount: boundedActual.matches?.length, truncated: boundedActual.truncated } });
     report.status = report.cases.length > 0 && report.cases.every((item) => item.passed) ? 'passed' : 'failed';
   } catch (error) { report.error = error.message; }
   finally {

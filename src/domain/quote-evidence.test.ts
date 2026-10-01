@@ -45,3 +45,15 @@ it('bounds surrounding excerpts without splitting Unicode surrogate pairs', asyn
     expect([...text].some((character) => character.length === 1 && /[\ud800-\udfff]/.test(character))).toBe(false);
   }
 });
+
+it('accepts the documented maximum sizes while keeping repeated-match output bounded', async () => {
+  const result = await matchQuote(request('😀'.repeat(50000), '😀'.repeat(5000)));
+  expect(result).toMatchObject({ status: 'matched', truncated: true });
+  if (!('matches' in result)) throw new Error('Expected matches');
+  expect(result.matches).toHaveLength(20);
+  expect(result.matches.map((entry) => entry.start)).toEqual(Array.from({ length: 20 }, (_, index) => index * 2));
+  expect(result.matches.every((entry) => entry.before.length <= 40 && entry.after.length <= 40)).toBe(true);
+});
+it('rejects an oversized quote even when the source is within its allowed size', async () => {
+  expect((await matchQuote(request('x'.repeat(20000), 'x'.repeat(10001)))).status).toBe('error');
+});
