@@ -1,0 +1,6 @@
+{
+  "checkedEvaluations": 14,
+  "issues": [],
+  "passed": true,
+  "method": "Check supplied facts for invention/change, explicit target pins, and structured result against independent recorded expected answers. Missing irrelevant facts are allowed."
+}

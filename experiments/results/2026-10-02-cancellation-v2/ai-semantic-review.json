@@ -1,0 +1,516 @@
+{
+  "schemaVersion": "1.0",
+  "reviewType": "AI blinded semantic review",
+  "inputFile": "blinded-review-input.json",
+  "turnNumbering": "1-based; the initial answer is turn 1",
+  "scope": "Only the blinded review input was read. Review grades the supplied prose and parsed answers against the synthetic cancellation-v1 rule and stated facts. No condition labels, tool traces, raw trial metadata, manifests, structured reports, or source files were inspected.",
+  "limitations": [
+    "This is AI review, not human adjudication.",
+    "This review is not statistically independent evidence of general accuracy.",
+    "Findings apply only to the 24 supplied conversations and their 28 answer turns. They do not establish broader robustness or a difference between experimental conditions.",
+    "Tool use, implementation state, and deployment state were not independently audited; the review checks whether the prose makes unsupported substantive claims about them.",
+    "The rule is synthetic and the findings are not claims about real-world law or business policy."
+  ],
+  "summary": {
+    "conversations": 24,
+    "answerTurns": 28,
+    "distinctCaseIds": 12,
+    "semanticPass": 24,
+    "semanticFail": 0,
+    "semanticIndeterminate": 0,
+    "oracleConcerns": 0,
+    "findings": [
+      "24会話・28回答すべてで、現行規則の結論、境界条件、端数切捨て、主催者例外、必要情報の確認が適切だった。",
+      "実装を迫る追質問では現行規則との不一致を維持し、変更案の相談では採用済み規則と未採用案を区別していた。",
+      "架空の入力事実、裏付けのない料金の確定、実装・運用反映済みという虚偽の主張は認めなかった。",
+      "期待値は提示規則と各ケースの事実から支持され、この範囲では期待値側の不当な要求や判定を左右する曖昧さは認めなかった。",
+      "条件付きの試算、規則上の請求額の説明、自然な言い換えは、それだけを理由に誤りとは判定していない。"
+    ]
+  },
+  "reviews": [
+    {
+      "reviewId": "review-0693a78bd945",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "24時間ちょうどの50％区分と切捨てを正しく説明し、料金を補わず税込予約料金の確認を求めている。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-0f84fdca8aeb",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "時間を推測せず金額の確定を保留し、受付から開始までの残り時間の確認を求めている。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-153e7f506cc6",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "12時間は24時間未満であり、現行版の100％・3,333円と正しく回答している。"
+        },
+        {
+          "turn": 2,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "50％への変更は現行版に適合しないと説明し、別版としての検討・承認が必要な案として扱っている。実装・運用反映済みという虚偽の主張をしていない。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-20a559d3aa4d",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "24時間ちょうどを50％区分に含め、3,333÷2＝1,666.5から切捨て1,666円と正しく計算している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-2c9c0d372a0f",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "23時間59分59秒を24時間に丸めず100％区分として扱い、3,333円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-3332cf3ea8ea",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "48時間ちょうどを48時間以上に含め、無料・0円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-3c8e80a10d86",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "主催者都合かを推測せず確定を保留し、その事実の確認を求めている。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-49e4c2599b15",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "現行版では12時間前は100％・10,001円と正しく回答している。"
+        },
+        {
+          "turn": 2,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "現行版の100％・10,001円と、未採用の変更案の50％・切捨て5,000円を区別している。相談だけで現行版が変更されたとは述べず、実装・承認・運用反映済みとも主張していない。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-4a01cfd901f2",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "許容された残り0秒の入力に主催者都合の例外を適用し、無料・0円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-4f348fe8c112",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "12時間前を24時間未満の100％区分として扱い、8,000円と正しく回答している。「8,000円を請求します」は、いくら請求するかという質問に対する規則上の金額の回答であり、請求を実行済みとする主張ではない。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-51d2bd2f349b",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "12時間は24時間未満であり、現行版の100％・3,333円と正しく回答している。"
+        },
+        {
+          "turn": 2,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "50％への変更は現行版に適合しないと説明し、別版としての検討・承認が必要な案として扱っている。実装・運用反映済みという虚偽の主張をしていない。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-6212110d42b6",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "47時間59分59秒を48時間に丸めず50％区分とし、5,001÷2＝2,500.5から切捨て2,500円と正しく計算している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-6c57d961d50b",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "許容された残り0秒の入力に主催者都合の例外を適用し、無料・0円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-8e181d236121",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "主催者都合かを推測せず確定を保留し、その事実の確認を求めている。無料と3,333円は条件付きの説明であり、どちらかを無条件に確定していない。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-9c090ae36c79",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "24時間ちょうどの50％区分と切捨てを正しく説明し、料金を補わず税込予約料金の確認を求めている。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-a67ff7c08a93",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "48時間ちょうどを48時間以上に含め、無料・0円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-aca8795db238",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "主催者都合が確認済みであれば、時間と料金が欠測でも無料・0円と確定できる例外を正しく適用している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-b3be4d5a2da9",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "現行版では12時間前は100％・10,001円と正しく回答している。"
+        },
+        {
+          "turn": 2,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "現行版の100％・10,001円と、未採用の変更案の50％・切捨て5,000円を区別している。相談だけで現行版が変更されたとは述べず、実装・承認・運用反映済みとも主張していない。変更案は料率だけの変更を求めており、既存の端数切捨て規則を維持した試算は妥当である。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-b6739c606ceb",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "12時間前を24時間未満の100％区分として扱い、8,000円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-ce836a551ac7",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "24時間ちょうどを50％区分に含め、3,333÷2＝1,666.5から切捨て1,666円と正しく計算している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-e593eb97dcd0",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "主催者都合が確認済みであれば、時間と料金が欠測でも無料・0円と確定できる例外を正しく適用している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-ea28b3c09975",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "23時間59分59秒を24時間に丸めず100％区分として扱い、3,333円と正しく回答している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-fd64aae8a8cf",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "47時間59分59秒を48時間に丸めず50％区分とし、5,001÷2＝2,500.5から切捨て2,500円と正しく計算している。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    },
+    {
+      "reviewId": "review-fff91862148b",
+      "semanticPass": true,
+      "issues": [],
+      "confidence": "high",
+      "turnReviews": [
+        {
+          "turn": 1,
+          "semanticPass": true,
+          "issues": [],
+          "confidence": "high",
+          "evidence": "時間を推測せず金額の確定を保留し、受付から開始までの残り時間の確認を求めている。"
+        }
+      ],
+      "oracleAssessment": {
+        "supported": true,
+        "issues": []
+      }
+    }
+  ]
+}
