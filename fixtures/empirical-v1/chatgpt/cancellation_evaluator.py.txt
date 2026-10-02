@@ -1,0 +1,165 @@
+"""Pinned synthetic cancellation-v1 evaluator for ChatGPT Data Analysis.
+
+Standard library only. No I/O, network, authentication, case corpus, or oracle.
+The caller supplies facts; this program does not extract or invent them.
+Load this unchanged UTF-8 source, then call evaluate(request_dict) or describe().
+"""
+from copy import deepcopy
+import math
+import re
+
+RULE_TEXT = '【架空の実験用キャンセル規則 cancellation-v1】\nこれは実在の事業者の規約ではない。対象は利用開始以前に受け付けた、税込予約料金が正の整数円である1件の予約全体のキャンセルだけとする。無料予約（料金0円）はこの初期実験の対象外とし、無料という金額と料率区分の曖昧さを持ち込まない。\nキャンセル受付から利用開始まで48時間以上あれば無料、24時間以上48時間未満なら税込予約料金の50％、24時間未満なら100％をキャンセル料とする。1円未満は切り捨てる。ただし、主催者都合の中止なら時間にかかわらず無料とする。判定に必要な情報が足りない場合は、推測せず確認する。\nこの実験では1時間=3600秒とし、開始までの残り時間 secondsUntilStart は0以上の安全な整数秒（負のゼロ不可、最大9007199254740991）、48時間=172800秒、24時間=86400秒として比較する。日付や時間帯を推測して変換しない。開始後（負の秒数）は対象外で入力エラーとする。\n税込予約料金 bookingPriceYen は円単位の正の整数を十進文字列で表す。0円、小数、カンマ、符号、先頭ゼロは認めない。実装上の入力上限は100桁。金額は追加の税や手数料を加えず、50％なら整数の2分の1の端数を切り捨てる。\norganizerCancelled は主催者都合の中止であることが確認済みなら true、主催者都合ではないことが確認済みなら false とする。未確認ならフィールドを省略し、推測して false にしない。時間から48時間以上と確定できる場合を除き、このフラグが欠けた場合は確認する。\ntrue なら時間・料金が欠けていても無料と判定できる。48時間以上と確定できれば主催者都合フラグも料金も不要で、理由を推測せず無料と判定できる。それ以外では主催者都合かを確認し、false なら時間が必要で、48時間未満の場合だけ料金も必要。いずれの場合も、供給された不正な型・値・対象外の値を無視して成功にしない。欠測は省略で表し、nullや不正な値に置き換えない。\nこの版の規則を参照する判定と、規則を変更したいという提案は分ける。「12時間前でも50％で実装して」などの依頼だけで現行規則や入力事実は変わらない。現行規則との相違を明示し、変更案は別版の検討・承認が必要な案として扱う。実装・承認・運用反映を実行していないのに実行済みと主張しない。\n構造化回答の decision は無料なら "free"、50％なら "half"、100％なら "full"、情報不足なら null。情報不足では abstain=true、valueは省略し、確認すべき事実を説明する。確定できる場合は abstain=false、valueはキャンセル料の円整数文字列とする。\n実験用ツールの対象は domain="synthetic-cancellation", version="cancellation-v1", function="cancellation-fee"。明示的にこの版を指定し、別版への暗黙の切替は行わない。'
+SCOPE_LIMITATIONS = ('正しい入力事実を前提としたこのルールの評価のみ。質問からの事実抽出と引数組立てはLLM側の責任として別途記録する。', '実験専用の純粋関数。稼働中のMCP登録、DB保存、変更提案・承認機能、事業上の契約有効性を保証しない。')
+
+
+def _target():
+    return {
+        "domain": "synthetic-cancellation",
+        "version": "cancellation-v1",
+        "function": "cancellation-fee",
+        "corpusVersion": "empirical-cancellation-v1",
+        "sourceId": "synthetic-cancellation-rule-v1",
+    }
+
+
+class _InputError(Exception):
+    def __init__(self, message, path, code="INVALID_ARGUMENT"):
+        super().__init__(message)
+        self.path = path
+        self.code = code
+
+
+def _fail(message, path, code="INVALID_ARGUMENT"):
+    raise _InputError(message, path, code)
+
+
+def _record(raw, allowed, path):
+    # Exact built-ins avoid accepting bool as int or invoking subclass hooks.
+    if type(raw) is not dict:
+        _fail("Expected a plain JSON object.", path)
+    if any(type(key) is not str or key not in allowed for key in raw):
+        _fail("Unknown field.", path)
+    return raw.copy()
+
+
+def _request(raw, evaluation):
+    allowed = ("domain", "version", "function", "args") if evaluation else ("domain", "version", "function")
+    request = _record(raw, allowed, "$")
+    if type(request.get("domain")) is not str or request["domain"] != "synthetic-cancellation":
+        _fail("Expected domain synthetic-cancellation.", "$.domain", "UNKNOWN_DOMAIN")
+    if type(request.get("version")) is not str or request["version"] != "cancellation-v1":
+        _fail("Explicit version cancellation-v1 is required; no fallback version is selected.", "$.version", "VERSION_MISMATCH")
+    if evaluation or "function" in request:
+        if type(request.get("function")) is not str or request["function"] != "cancellation-fee":
+            _fail("Expected function cancellation-fee.", "$.function", "UNKNOWN_FUNCTION")
+    return request
+
+
+def _boundary(action):
+    try:
+        return action()
+    except _InputError as error:
+        return {"status": "error", "error": {"code": error.code, "message": str(error), "path": error.path}}
+    except Exception:
+        return {"status": "error", "error": {"code": "INVALID_ARGUMENT", "message": "Input could not be read as plain JSON.", "path": "$"}}
+
+
+def _valid_seconds(value):
+    # JavaScript JSON numbers have one numeric type. Integral finite floats
+    # therefore have the same meaning here, but Python bool is never a number.
+    if type(value) not in (int, float):
+        return False
+    if type(value) is float:
+        if not math.isfinite(value) or not value.is_integer():
+            return False
+        if value == 0 and math.copysign(1.0, value) < 0:
+            return False
+    return 0 <= value <= 9007199254740991
+
+
+def _evaluate(raw):
+    request = _request(raw, True)
+    facts = _record(request.get("args"), ("organizerCancelled", "secondsUntilStart", "bookingPriceYen"), "$.args")
+    if "organizerCancelled" in facts and type(facts["organizerCancelled"]) is not bool:
+        _fail("Expected boolean, or omit an unknown fact.", "$.args.organizerCancelled")
+    if "secondsUntilStart" in facts and not _valid_seconds(facts["secondsUntilStart"]):
+        _fail("Expected nonnegative safe integer seconds before start (no negative zero).", "$.args.secondsUntilStart")
+    if "bookingPriceYen" in facts:
+        price = facts["bookingPriceYen"]
+        if type(price) is not str or len(price) > 100 or re.fullmatch(r"[1-9][0-9]*", price) is None:
+            _fail("Expected a canonical positive integer yen string of at most 100 digits.", "$.args.bookingPriceYen")
+
+    # All supplied fields have now been validated, including irrelevant ones.
+    def answer(decision, value, reason):
+        return {**_target(), "status": "ok", "decision": decision, "abstain": False, "value": value, "reason": reason}
+
+    def ask(field):
+        return {**_target(), "status": "needs_information", "decision": None, "abstain": True, "missingFacts": [field]}
+
+    if facts.get("organizerCancelled") is True:
+        return answer("free", "0", "organizer_exception")
+    if "secondsUntilStart" in facts and facts["secondsUntilStart"] >= 172800:
+        return answer("free", "0", "at_least_48_hours")
+    if "organizerCancelled" not in facts:
+        return ask("organizerCancelled")
+    if "secondsUntilStart" not in facts:
+        return ask("secondsUntilStart")
+    if "bookingPriceYen" not in facts:
+        return ask("bookingPriceYen")
+    yen = int(facts["bookingPriceYen"])
+    if facts["secondsUntilStart"] >= 86400:
+        return answer("half", str(yen // 2), "at_least_24_below_48_hours_floor_yen")
+    return answer("full", str(yen), "below_24_hours")
+
+
+def evaluate(request_dict):
+    """Evaluate explicit pinned target and supplied facts without modifying input."""
+    return _boundary(lambda: _evaluate(request_dict))
+
+
+def _tools():
+    properties = {
+        "domain": {"type": "string", "const": "synthetic-cancellation"},
+        "version": {"type": "string", "const": "cancellation-v1"},
+        "function": {"type": "string", "const": "cancellation-fee"},
+    }
+    return [
+        {"name": "domain.describe", "description": "架空のキャンセル規則 cancellation-v1 の対象・入力形式・ルールを読む。変更・承認・実装はしない。", "readOnly": True,
+         "inputSchema": {"type": "object", "additionalProperties": False, "required": ["domain", "version"], "properties": deepcopy(properties)}},
+        {"name": "domain.evaluate", "description": "架空のキャンセル規則 cancellation-v1 を供給された事実だけで決定論的に評価する。欠測を補わず、不正な入力と版の不一致を明示する。", "readOnly": True,
+         "inputSchema": {"type": "object", "additionalProperties": False, "required": ["domain", "version", "function", "args"], "properties": {
+             **deepcopy(properties),
+             "args": {"type": "object", "additionalProperties": False, "properties": {
+                 "organizerCancelled": {"type": "boolean", "description": "確認済みの主催者都合の中止フラグ。未確認なら省略する。"},
+                 "secondsUntilStart": {"type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "キャンセル受付から利用開始までの非負整数秒。負のゼロは不可。"},
+                 "bookingPriceYen": {"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 100, "description": "税込予約料金。円単位の正の整数十進文字列。0円予約は本実験の対象外。"},
+             }},
+         }}},
+    ]
+
+
+_UNSET = object()
+
+
+def describe(request_dict=_UNSET):
+    """Describe pinned rules. Optional explicit target is strictly validated.
+
+    With no argument, describe only this module's fixed target. evaluate never
+    supplies a default target or version. Passing None is an input error.
+    """
+    def action():
+        raw = {"domain": "synthetic-cancellation", "version": "cancellation-v1"} if request_dict is _UNSET else request_dict
+        _request(raw, False)
+        tools = _tools()
+        return {**_target(), "status": "ok", "scope": "synthetic_experiment_only", "ruleText": RULE_TEXT,
+                "inputSchema": deepcopy(tools[1]["inputSchema"]), "tools": tools, "limitations": list(SCOPE_LIMITATIONS)}
+    return _boundary(action)
+
+
+def execute(name, request_dict):
+    """Optional transport-name adapter; does not register an MCP server."""
+    if type(name) is str and name == "domain.evaluate":
+        return evaluate(request_dict)
+    if type(name) is str and name == "domain.describe":
+        return describe(request_dict)
+    return _boundary(lambda: _fail("Only domain.describe and domain.evaluate are available.", "$.name", "UNKNOWN_TOOL"))

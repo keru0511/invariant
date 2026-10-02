@@ -19,7 +19,8 @@
     "pr:create": "node scripts/pr-create.mjs",
     "lab:setup": "node scripts/local-lab.mjs setup",
     "lab:start": "node scripts/local-lab.mjs start",
-    "lab:check": "node scripts/local-lab.mjs check"
+    "lab:check": "node scripts/local-lab.mjs check",
+    "eval:empirical:prepare": "node scripts/empirical-prepare.mjs"
   },
   "devDependencies": {
     "@mizchi/actrun": "0.32.0",
