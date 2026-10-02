@@ -91,3 +91,5 @@ npm run hooks:install
 このコマンドはLLMを呼びません。別途実施した12ケースの予備比較では両条件とも全問正解で、精度差は確認できませんでした。
 [保存済みの回答・実行記録と限界](experiments/results/2026-10-02-cancellation-v2/README.md)を公開しています。
 [実験の設計と限界](docs/empirical-experiment.md)を参照してください。
+
+公開議事録からのタスク抽出についても、[5有効ペアでの検証・修正比較と限界](experiments/results/2026-10-02-public-minutes-v1/README.md)を記録しています。
