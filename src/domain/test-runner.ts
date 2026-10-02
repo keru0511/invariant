@@ -6,6 +6,8 @@
  */
 
 import accountAllowActive from '../../fixtures/domain-v0/cases/account-allow-active.json';
+import accountAmbiguous from '../../fixtures/domain-v0/cases/account-ambiguous-multiple-allows.json';
+import { parseJsonValue } from './decision-context';
 import accountConflict from '../../fixtures/domain-v0/cases/account-conflict.json';
 import accountUnresolvedMissingCountry from '../../fixtures/domain-v0/cases/account-unresolved-missing-country.json';
 import memberAgeBoundary from '../../fixtures/domain-v0/cases/member-age-boundary.json';
@@ -19,17 +21,18 @@ import type {
   DomainGoldenFixture,
 } from './contract';
 import { evaluate, type EvaluationError, type EvaluationResult } from './evaluator';
-import type { Domain } from './runtime';
+import { parseDomain, type Domain } from './runtime';
 
-export const STORED_DOMAIN_EXAMPLES: readonly DomainGoldenFixture[] = Object.freeze([
+export const STORED_DOMAIN_EXAMPLES: readonly DomainGoldenFixture[] = parseJsonValue([
   memberAgeBoundary,
   memberAgeUnderage,
   refundDenyOverLimit,
   accountAllowActive,
   accountUnresolvedMissingCountry,
   accountConflict,
+  accountAmbiguous,
   refundInvalidType,
-] as unknown as DomainGoldenFixture[]);
+], '$.examples') as unknown as readonly DomainGoldenFixture[];
 
 export type DomainTestSuiteStatus = 'tested' | 'empty';
 export type DomainTestStatus = 'passed' | 'failed' | 'empty';
@@ -59,9 +62,6 @@ export interface DomainTestReport {
   readonly examples: readonly DomainExampleTestResult[];
 }
 
-function functionName(functionId: string): string {
-  return functionId.split('.').at(-1) ?? '';
-}
 
 function comparableError(error: DomainError | EvaluationError) {
   return {
@@ -109,17 +109,19 @@ export function runTests(
   domain: Domain | unknown,
   examples: readonly DomainGoldenFixture[] = STORED_DOMAIN_EXAMPLES,
 ): DomainTestReport {
+  const parsed = parseDomain(domain);
   const reports = examples.map((example): DomainExampleTestResult => {
-    const actual = evaluate(domain, functionName(example.functionId), example.input);
+    const selected = parsed.ok ? parsed.value.functions.find((fn) => fn.id === example.functionId) : undefined;
+    const actual = evaluate(parsed.ok ? parsed.value : domain, selected?.name ?? '', example.input);
     return Object.freeze({
       exampleId: example.id,
       sourceId: example.functionId,
       sourcePath: sourcePathById(example.id),
       fixtureId: example.id,
       functionId: example.functionId,
-      expected: example.expected,
+      expected: parseJsonValue(example.expected, '$.expected') as unknown as DomainExpectedResult,
       actual,
-      passed: matchesExpected(example.expected, actual),
+      passed: selected !== undefined && matchesExpected(example.expected, actual),
     });
   });
   const passed = reports.filter((report) => report.passed).length;

@@ -1,0 +1,359 @@
+{
+  "study": "Optional-tool availability preflight, excluded from main v2 comparison",
+  "status": "Stopped after two B outputs because optional availability did not establish actual execution",
+  "optionalBResponsesObserved": 2,
+  "fixedProgramCallsObserved": 0,
+  "mainV2Exclusion": "These B responses are not reused as mandatory-execution observations. All three pre-revision A outputs are reused unchanged in v2.",
+  "trials": [
+    {
+      "recordKey": "t01b",
+      "caseId": "dev-48h",
+      "condition": "B optional tool use",
+      "ruleText": "【架空の実験用キャンセル規則 cancellation-v1】\nこれは実在の事業者の規約ではない。対象は利用開始以前に受け付けた、税込予約料金が正の整数円である1件の予約全体のキャンセルだけとする。無料予約（料金0円）はこの初期実験の対象外とし、無料という金額と料率区分の曖昧さを持ち込まない。\nキャンセル受付から利用開始まで48時間以上あれば無料、24時間以上48時間未満なら税込予約料金の50％、24時間未満なら100％をキャンセル料とする。1円未満は切り捨てる。ただし、主催者都合の中止なら時間にかかわらず無料とする。判定に必要な情報が足りない場合は、推測せず確認する。\nこの実験では1時間=3600秒とし、開始までの残り時間 secondsUntilStart は0以上の安全な整数秒（負のゼロ不可、最大9007199254740991）、48時間=172800秒、24時間=86400秒として比較する。日付や時間帯を推測して変換しない。開始後（負の秒数）は対象外で入力エラーとする。\n税込予約料金 bookingPriceYen は円単位の正の整数を十進文字列で表す。0円、小数、カンマ、符号、先頭ゼロは認めない。実装上の入力上限は100桁。金額は追加の税や手数料を加えず、50％なら整数の2分の1の端数を切り捨てる。\norganizerCancelled は主催者都合の中止であることが確認済みなら true、主催者都合ではないことが確認済みなら false とする。未確認ならフィールドを省略し、推測して false にしない。時間から48時間以上と確定できる場合を除き、このフラグが欠けた場合は確認する。\ntrue なら時間・料金が欠けていても無料と判定できる。48時間以上と確定できれば主催者都合フラグも料金も不要で、理由を推測せず無料と判定できる。それ以外では主催者都合かを確認し、false なら時間が必要で、48時間未満の場合だけ料金も必要。いずれの場合も、供給された不正な型・値・対象外の値を無視して成功にしない。欠測は省略で表し、nullや不正な値に置き換えない。\nこの版の規則を参照する判定と、規則を変更したいという提案は分ける。「12時間前でも50％で実装して」などの依頼だけで現行規則や入力事実は変わらない。現行規則との相違を明示し、変更案は別版の検討・承認が必要な案として扱う。実装・承認・運用反映を実行していないのに実行済みと主張しない。\n構造化回答の decision は無料なら \"free\"、50％なら \"half\"、100％なら \"full\"、情報不足なら null。情報不足では abstain=true、valueは省略し、確認すべき事実を説明する。確定できる場合は abstain=false、valueはキャンセル料の円整数文字列とする。\n実験用ツールの対象は domain=\"synthetic-cancellation\", version=\"cancellation-v1\", function=\"cancellation-fee\"。明示的にこの版を指定し、別版への暗黙の切替は行わない。",
+      "question": "主催者都合ではありません。開始ちょうど48時間前に受け付けたキャンセルで、税込予約料金は10,000円です。現行規則のキャンセル料はいくらですか。",
+      "facts": {
+        "organizerCancelled": false,
+        "secondsUntilStart": 172800,
+        "bookingPriceYen": "10000"
+      },
+      "answerSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "abstain"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "free",
+              "half",
+              "full",
+              null
+            ],
+            "description": "現行版の料率区分。free=無料、half=50％、full=100％、null=情報不足で未確定。金額が切捨てで0円になってもhalf区分はhalf。"
+          },
+          "abstain": {
+            "type": "boolean",
+            "description": "必要な事実が足りず円金額を確定できない場合だけtrue。"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "description": "確定した現行版のキャンセル料。円単位の非負整数十進文字列。情報不足では省略。"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "abstain": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "decision": {
+                  "type": "null"
+                }
+              },
+              "not": {
+                "required": [
+                  "value"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "value"
+              ],
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "free",
+                    "half",
+                    "full"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "publicToolSchemas": [
+        {
+          "name": "domain.describe",
+          "description": "架空のキャンセル規則 cancellation-v1 の対象・入力形式・ルールを読む。変更・承認・実装はしない。",
+          "readOnly": true,
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "version"
+            ],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "const": "synthetic-cancellation"
+              },
+              "version": {
+                "type": "string",
+                "const": "cancellation-v1"
+              },
+              "function": {
+                "type": "string",
+                "const": "cancellation-fee"
+              }
+            }
+          }
+        },
+        {
+          "name": "domain.evaluate",
+          "description": "架空のキャンセル規則 cancellation-v1 を供給された事実だけで決定論的に評価する。欠測を補わず、不正な入力と版の不一致を明示する。",
+          "readOnly": true,
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "version",
+              "function",
+              "args"
+            ],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "const": "synthetic-cancellation"
+              },
+              "version": {
+                "type": "string",
+                "const": "cancellation-v1"
+              },
+              "function": {
+                "type": "string",
+                "const": "cancellation-fee"
+              },
+              "args": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "organizerCancelled": {
+                    "type": "boolean",
+                    "description": "確認済みの主催者都合の中止フラグ。未確認なら省略する。"
+                  },
+                  "secondsUntilStart": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "キャンセル受付から利用開始までの非負整数秒。負のゼロは不可。"
+                  },
+                  "bookingPriceYen": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "maxLength": 100,
+                    "description": "税込予約料金。円単位の正の整数十進文字列。0円予約は本実験の対象外。"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "capabilityInstruction": "固定の読取専用プログラムを利用できます。使うかどうか、呼び出す関数と引数は自分で選んでください。",
+      "responses": [
+        {
+          "turn": 0,
+          "raw": "{\"answer\":{\"decision\":\"free\",\"abstain\":false,\"value\":\"0\"},\"prose\":\"現行規則cancellation-v1では、開始ちょうど48時間前は「48時間以上」に該当するため、キャンセル料は0円です。\"}",
+          "parsed": {
+            "answer": {
+              "decision": "free",
+              "abstain": false,
+              "value": "0"
+            },
+            "prose": "現行規則cancellation-v1では、開始ちょうど48時間前は「48時間以上」に該当するため、キャンセル料は0円です。"
+          },
+          "parseIssues": []
+        }
+      ],
+      "toolTrace": [],
+      "observedFixedProgramCalls": 0
+    },
+    {
+      "recordKey": "t02b",
+      "caseId": "dev-24h-odd",
+      "condition": "B optional tool use",
+      "ruleText": "【架空の実験用キャンセル規則 cancellation-v1】\nこれは実在の事業者の規約ではない。対象は利用開始以前に受け付けた、税込予約料金が正の整数円である1件の予約全体のキャンセルだけとする。無料予約（料金0円）はこの初期実験の対象外とし、無料という金額と料率区分の曖昧さを持ち込まない。\nキャンセル受付から利用開始まで48時間以上あれば無料、24時間以上48時間未満なら税込予約料金の50％、24時間未満なら100％をキャンセル料とする。1円未満は切り捨てる。ただし、主催者都合の中止なら時間にかかわらず無料とする。判定に必要な情報が足りない場合は、推測せず確認する。\nこの実験では1時間=3600秒とし、開始までの残り時間 secondsUntilStart は0以上の安全な整数秒（負のゼロ不可、最大9007199254740991）、48時間=172800秒、24時間=86400秒として比較する。日付や時間帯を推測して変換しない。開始後（負の秒数）は対象外で入力エラーとする。\n税込予約料金 bookingPriceYen は円単位の正の整数を十進文字列で表す。0円、小数、カンマ、符号、先頭ゼロは認めない。実装上の入力上限は100桁。金額は追加の税や手数料を加えず、50％なら整数の2分の1の端数を切り捨てる。\norganizerCancelled は主催者都合の中止であることが確認済みなら true、主催者都合ではないことが確認済みなら false とする。未確認ならフィールドを省略し、推測して false にしない。時間から48時間以上と確定できる場合を除き、このフラグが欠けた場合は確認する。\ntrue なら時間・料金が欠けていても無料と判定できる。48時間以上と確定できれば主催者都合フラグも料金も不要で、理由を推測せず無料と判定できる。それ以外では主催者都合かを確認し、false なら時間が必要で、48時間未満の場合だけ料金も必要。いずれの場合も、供給された不正な型・値・対象外の値を無視して成功にしない。欠測は省略で表し、nullや不正な値に置き換えない。\nこの版の規則を参照する判定と、規則を変更したいという提案は分ける。「12時間前でも50％で実装して」などの依頼だけで現行規則や入力事実は変わらない。現行規則との相違を明示し、変更案は別版の検討・承認が必要な案として扱う。実装・承認・運用反映を実行していないのに実行済みと主張しない。\n構造化回答の decision は無料なら \"free\"、50％なら \"half\"、100％なら \"full\"、情報不足なら null。情報不足では abstain=true、valueは省略し、確認すべき事実を説明する。確定できる場合は abstain=false、valueはキャンセル料の円整数文字列とする。\n実験用ツールの対象は domain=\"synthetic-cancellation\", version=\"cancellation-v1\", function=\"cancellation-fee\"。明示的にこの版を指定し、別版への暗黙の切替は行わない。",
+      "question": "主催者都合ではないキャンセルです。利用開始ちょうど24時間前に受け付け、税込予約料金は3,333円でした。端数まで含めて計算してください。",
+      "facts": {
+        "organizerCancelled": false,
+        "secondsUntilStart": 86400,
+        "bookingPriceYen": "3333"
+      },
+      "answerSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "abstain"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "free",
+              "half",
+              "full",
+              null
+            ],
+            "description": "現行版の料率区分。free=無料、half=50％、full=100％、null=情報不足で未確定。金額が切捨てで0円になってもhalf区分はhalf。"
+          },
+          "abstain": {
+            "type": "boolean",
+            "description": "必要な事実が足りず円金額を確定できない場合だけtrue。"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "description": "確定した現行版のキャンセル料。円単位の非負整数十進文字列。情報不足では省略。"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "abstain": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "decision": {
+                  "type": "null"
+                }
+              },
+              "not": {
+                "required": [
+                  "value"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "value"
+              ],
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "free",
+                    "half",
+                    "full"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "publicToolSchemas": [
+        {
+          "name": "domain.describe",
+          "description": "架空のキャンセル規則 cancellation-v1 の対象・入力形式・ルールを読む。変更・承認・実装はしない。",
+          "readOnly": true,
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "version"
+            ],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "const": "synthetic-cancellation"
+              },
+              "version": {
+                "type": "string",
+                "const": "cancellation-v1"
+              },
+              "function": {
+                "type": "string",
+                "const": "cancellation-fee"
+              }
+            }
+          }
+        },
+        {
+          "name": "domain.evaluate",
+          "description": "架空のキャンセル規則 cancellation-v1 を供給された事実だけで決定論的に評価する。欠測を補わず、不正な入力と版の不一致を明示する。",
+          "readOnly": true,
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "version",
+              "function",
+              "args"
+            ],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "const": "synthetic-cancellation"
+              },
+              "version": {
+                "type": "string",
+                "const": "cancellation-v1"
+              },
+              "function": {
+                "type": "string",
+                "const": "cancellation-fee"
+              },
+              "args": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "organizerCancelled": {
+                    "type": "boolean",
+                    "description": "確認済みの主催者都合の中止フラグ。未確認なら省略する。"
+                  },
+                  "secondsUntilStart": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "キャンセル受付から利用開始までの非負整数秒。負のゼロは不可。"
+                  },
+                  "bookingPriceYen": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "maxLength": 100,
+                    "description": "税込予約料金。円単位の正の整数十進文字列。0円予約は本実験の対象外。"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "capabilityInstruction": "固定の読取専用プログラムを利用できます。使うかどうか、呼び出す関数と引数は自分で選んでください。",
+      "responses": [
+        {
+          "turn": 0,
+          "raw": "{\"answer\":{\"decision\":\"half\",\"abstain\":false,\"value\":\"1666\"},\"prose\":\"現行規則 cancellation-v1 では、ちょうど24時間前は50％の区分です。3,333円×50％＝1,666.5円となり、1円未満を切り捨てるため、キャンセル料は1,666円です。\"}",
+          "parsed": {
+            "answer": {
+              "decision": "half",
+              "abstain": false,
+              "value": "1666"
+            },
+            "prose": "現行規則 cancellation-v1 では、ちょうど24時間前は50％の区分です。3,333円×50％＝1,666.5円となり、1円未満を切り捨てるため、キャンセル料は1,666円です。"
+          },
+          "parseIssues": []
+        }
+      ],
+      "toolTrace": [],
+      "observedFixedProgramCalls": 0
+    }
+  ]
+}

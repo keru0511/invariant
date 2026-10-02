@@ -1,3 +1,4 @@
+import { DomainObjectReader } from '../persistence/domain-objects';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
@@ -25,7 +26,7 @@ function database() {
   const sqlite = new DatabaseSync(':memory:');
   databases.push(sqlite);
   sqlite.exec('PRAGMA foreign_keys = ON');
-  for (const file of ['0001_domain_persistence.sql', '0002_workspace_memberships.sql', '0003_domain_proposals.sql']) {
+  for (const file of ['0001_domain_persistence.sql', '0002_workspace_memberships.sql', '0003_domain_proposals.sql', '0004_content_addressed_domains.sql']) {
     sqlite.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'));
   }
   const prepare = (sql, values = []) => ({
@@ -97,13 +98,23 @@ describe('reviewed domain authoring', () => {
     expect(proposed.requiresConfirmation).toBe(true);
     expect(proposed.review.sources).toEqual(input.conversation);
     expect(proposed.review.unknowns).toHaveLength(1);
+    expect(proposed.review.coverage.storedExampleStatus).toBe('empty');
+    expect(proposed.review.coverage.functionsWithoutStoredExamples.length).toBe(catalog.functions.length);
     expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_versions').get().n).toBe(1);
     const before = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
     expect(before.decision).toBe('allow');
     const committed = (await call('domain.commit', confirmation(proposed), s)).value;
     expect(committed.status).toBe('committed');
     const evaluated = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version, function: 'member-age', args: { user: { age: 20 } } }, s)).value;
-    expect(evaluated.decision).toBe('deny');
+    expect(evaluated.snapshot.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(evaluated.snapshot.parentVersionId).toBe('v1');
+    expect(evaluated.status).toBe('unresolved');
+    expect(evaluated.decision).toBeUndefined();
+    expect(evaluated.value).toBeNull();
+    expect(evaluated.errors[0].code).toBe('DOMAIN_KNOWLEDGE_INCOMPLETE');
+    expect(evaluated.knowledgeIssues.unknowns[0].id).toBe('unknown.country');
+    const described = (await call('domain.describe', { workspace: 'w', domain: 'd', version: committed.version }, s)).value;
+    expect(described.knowledgeIssues).toEqual(evaluated.knowledgeIssues);
     expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd' })).toBe(committed.version);
   });
 
@@ -255,4 +266,202 @@ describe('reviewed domain authoring', () => {
     expect(response.status).toBe(401);
     expect(s.provider.generate).not.toHaveBeenCalled();
   });
+});
+
+describe('published knowledge cannot silently become certainty', () => {
+  it('blocks a conflict even when executable rules agree', async () => {
+    const s = await setup(async (req) => {
+      const generated = output(req);
+      generated.patch.operations[1] = { op: 'add_conflict', conflict: {
+        id: 'conflict.age', kind: 'conflict', subject: 'adult threshold', alternatives: ['18', '21'],
+      } };
+      return generated;
+    });
+    const proposed = await proposeDomain(input, principal, s.dependencies);
+    const committed = await commitDomain(confirmation(proposed), principal, s.dependencies);
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version,
+      function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('conflict');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
+    expect(result.knowledgeIssues.conflicts[0].alternatives).toEqual(['18', '21']);
+  });
+
+  it('resumes evaluation only in a new version after explicit unknown resolution', async () => {
+    const s = await setup(async (req) => {
+      if (req.currentDomainVersion === 'v1') return output(req);
+      return { patch: { contractVersion: 'domain-patch-v0', kind: 'domain-patch', baseVersion: req.currentDomainVersion,
+        provenance: { source: 'conversation', reference: req.conversation[0].id },
+        operations: [{ op: 'resolve_unknown', unknownId: 'unknown.country', resolution: 'JP' }],
+      }, operationEvidence: [{ operationIndex: 0, sourceReferences: [req.conversation[0].id] }] };
+    });
+    const first = await proposeDomain(input, principal, s.dependencies);
+    const one = await commitDomain(confirmation(first), principal, s.dependencies);
+    const next = await proposeDomain({ ...input, baseVersion: one.version,
+      conversation: [{ id: 't2', role: 'user', content: 'Country is JP.' }] }, principal, s.dependencies);
+    const two = await commitDomain(confirmation(next), principal, s.dependencies);
+    const args = { workspace: 'w', domain: 'd', function: 'member-age', args: { user: { age: 20 } } };
+    expect((await call('domain.evaluate', { ...args, version: one.version }, s)).value.status).toBe('unresolved');
+    expect((await call('domain.evaluate', { ...args, version: two.version }, s)).value.decision).toBe('deny');
+    expect((await call('domain.evaluate', { ...args, version: 'v1' }, s)).value.decision).toBe('allow');
+  });
+
+  it.each(['null', '{}', '{"unknowns":[]}', 'not-json'])('fails closed on damaged authoring metadata %s', async (damaged) => {
+    const s = await setup();
+    const proposal = await proposeDomain(input, principal, s.dependencies);
+    const committed = await commitDomain(confirmation(proposal), principal, s.dependencies);
+    s.sqlite.prepare('UPDATE domain_proposals SET authoring_json = ?').run(damaged);
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: committed.version,
+      function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('error');
+    expect(result.errors[0].code).toBe('STORAGE_FAILURE');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
+  });
+});
+
+describe('review evidence snapshot', () => {
+  it('keeps review excerpts identical to the conversation sent for generation', async () => {
+    let release;
+    let observed;
+    const ready = new Promise((resolve) => { release = resolve; });
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    const s = await setup(async (req) => { observed = req; entered(); await ready; return output(req); });
+    const mutable = structuredClone(input);
+    const pending = proposeDomain(mutable, principal, s.dependencies);
+    await started;
+    mutable.conversation[0].content = 'Changed while waiting for the provider';
+    release();
+    const proposed = await pending;
+    expect(proposed.status).toBe('proposed');
+    expect(proposed.review.sources).toEqual(observed.conversation);
+    expect(proposed.review.sources[0].content).toBe(input.conversation[0].content);
+  });
+});
+
+describe('discover current knowledge rather than stale rules', () => {
+  it('prioritizes the current published version when the search limit is small', async () => {
+    const s = await setup();
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: catalog });
+    const top = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 1 }, s)).value;
+    expect(top.results[0].versionId).toBe('v2');
+    expect(top.results[0].isCurrentVersion).toBe(true);
+    const all = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 10 }, s)).value;
+    expect(all.results.find((item) => item.versionId === 'v1').isCurrentVersion).toBe(false);
+  });
+});
+
+it('marks a historical-only search hit as historical instead of claiming it is current', async () => {
+  const s = await setup();
+  const replacement = structuredClone(catalog);
+  replacement.functions[0].name = 'new-member-rule';
+  replacement.functions[0].description = 'Replaced rule';
+  await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: replacement });
+  const search = (await call('domain.search', { workspace: 'w', query: 'member-age', limit: 10 }, s)).value;
+  expect(search.results).toHaveLength(1);
+  expect(search.results[0]).toMatchObject({ versionId: 'v1', isCurrentVersion: false });
+  const old = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+  expect(old.decision).toBe('allow'); // Historical replay remains explicitly supported.
+});
+
+describe('Git-inspired per-domain content storage', () => {
+  it('shares identical snapshots while retaining distinct history and parent links', async () => {
+    const s = await setup();
+    const before = s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: catalog });
+    expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n).toBe(before);
+    const first = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' });
+    const second = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2' });
+    expect(first.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.contentHash).toBe(first.contentHash);
+    expect(first.parentVersionId).toBeNull();
+    expect(second.parentVersionId).toBe('v1');
+    expect(first.model).toEqual(second.model);
+  });
+
+  it('stores only the changed rule and its parent objects and leaves past versions reproducible', async () => {
+    const s = await setup();
+    const count = () => s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    const before = count();
+    const changed = structuredClone(catalog);
+    changed.functions[0].policy.rules[0].priority = 101;
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2', model: changed });
+    expect(count() - before).toBe(3); // Rule, function tree, catalog tree.
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).model).toEqual(catalog);
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v2' })).model).toEqual(changed);
+  });
+
+  it('keeps object resolution and version histories within the selected domain', async () => {
+    const s = await setup();
+    const other = structuredClone(catalog); other.functions[0].description = 'Other domain only';
+    await s.domains.publishVersion({ workspaceId: 'w', domainId: 'other', versionId: 'v1', model: other });
+    const foreignPointer = s.sqlite.prepare("SELECT model_json FROM domain_versions WHERE domain_id = 'other'").get().model_json;
+    s.sqlite.prepare("UPDATE domain_versions SET model_json = ? WHERE domain_id = 'd'").run(foreignPointer);
+    await expect(s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).rejects.toMatchObject({ code: 'CORRUPT_VERSION' });
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'other', versionId: 'v1' })).model).toEqual(other);
+  });
+
+  it('rejects missing or modified content-addressed objects', async () => {
+    const s = await setup();
+    const root = JSON.parse(s.sqlite.prepare('SELECT model_json FROM domain_versions').get().model_json).hash;
+    s.sqlite.prepare('UPDATE domain_objects SET payload_json = ? WHERE object_hash = ?').run('{}', root);
+    await expect(s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).rejects.toMatchObject({ code: 'CORRUPT_VERSION' });
+    const result = (await call('domain.evaluate', { workspace: 'w', domain: 'd', version: 'v1', function: 'member-age', args: { user: { age: 20 } } }, s)).value;
+    expect(result.status).toBe('error'); expect(result.value).toBeNull();
+  });
+
+  it('rolls back new shared objects when publication fails', async () => {
+    const s = await setup();
+    const before = s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n;
+    s.sqlite.exec("CREATE TRIGGER fail_version BEFORE INSERT ON domain_versions WHEN NEW.version_id = 'broken' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;");
+    const changed = structuredClone(catalog); changed.functions[0].description = 'New content';
+    await expect(s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: 'broken', model: changed })).rejects.toBeDefined();
+    expect(s.sqlite.prepare('SELECT COUNT(*) n FROM domain_objects').get().n).toBe(before);
+    expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd' })).toBe('v1');
+  });
+
+  it('reads inline legacy snapshots after the additive migration', async () => {
+    const s = await setup();
+    s.sqlite.prepare('INSERT INTO domain_versions (workspace_id,domain_id,version_id,model_json,published_at) VALUES (?,?,?,?,?)')
+      .run('w', 'd', 'legacy-inline', JSON.stringify(catalog), 'legacy');
+    const loaded = await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'legacy-inline' });
+    expect(loaded.model).toEqual(catalog); expect(loaded.contentHash).toBeUndefined();
+  });
+
+  it('reduces stored JSON bytes for a twenty-version history of small rule changes', async () => {
+    const s = await setup();
+    let oldBytes = Buffer.byteLength(JSON.stringify(catalog));
+    for (let index = 2; index <= 20; index++) {
+      const changed = structuredClone(catalog); changed.functions[0].policy.rules[0].priority = 100 + index;
+      oldBytes += Buffer.byteLength(JSON.stringify(changed));
+      await s.domains.publishVersion({ workspaceId: 'w', domainId: 'd', versionId: `v${index}`, model: changed });
+    }
+    const objects = s.sqlite.prepare('SELECT SUM(length(CAST(payload_json AS BLOB))) n FROM domain_objects').get().n;
+    const pointers = s.sqlite.prepare('SELECT SUM(length(CAST(model_json AS BLOB))) n FROM domain_versions').get().n;
+    expect(objects + pointers).toBeLessThan(oldBytes * 0.6);
+    expect((await s.domains.loadVersion({ workspaceId: 'w', domainId: 'd', versionId: 'v1' })).model).toEqual(catalog);
+  });
+});
+
+it('does not expose mutable cached search headers', async () => {
+  const s = await setup();
+  const serialized = s.sqlite.prepare('SELECT model_json FROM domain_versions').get().model_json;
+  const reader = new DomainObjectReader(s.db, { workspaceId: 'w', domainId: 'd' });
+  const headers = await reader.catalogIndex(serialized);
+  expect(Object.isFrozen(headers[0])).toBe(true);
+  expect(Reflect.set(headers[0], 'name', 'forged')).toBe(false);
+  expect(await reader.readCatalog(serialized)).toEqual(catalog);
+});
+
+it('rejects a generated rule that contradicts a stored example without publishing', async () => {
+  const s = await setup();
+  const example = JSON.parse(readFileSync(new URL('../../fixtures/domain-v0/cases/member-age-boundary.json', import.meta.url), 'utf8'));
+  const stored = { contractVersion: 'domain-v0', kind: 'domain-model', version: 'v1', domain: catalog,
+    types: [], examples: [example], unknowns: [], conflicts: [] };
+  vi.spyOn(s.proposals, 'authoringModel').mockResolvedValue(stored);
+  const proposed = await proposeDomain(input, principal, s.dependencies);
+  expect(proposed.status).toBe('error');
+  expect(s.sqlite.prepare('SELECT COUNT(*) AS count FROM domain_proposals').get().count).toBe(0);
+  expect(await s.proposals.head({ workspaceId: 'w', domainId: 'd', principalId: 'alice' })).toBe('v1');
 });

@@ -1,4 +1,8 @@
+import { DomainObjectReader, packCatalog, objectStatements, snapshotPointer } from './domain-objects';
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
+import type { DomainUnknown, DomainConflict } from '../domain/patch';
+import { stableJsonStringify } from '../domain/decision-context';
+import type { JsonValue } from '../domain/decision-context';
 import {
   parseDomain,
   type DomainCatalog,
@@ -42,9 +46,16 @@ export interface DomainVersionRecord {
   readonly versionId: string;
   readonly model: DomainCatalog;
   readonly publishedAt: string;
+  readonly contentHash?: string;
+  readonly parentVersionId?: string | null;
+  readonly knowledgeIssues?: {
+    readonly unknowns: readonly DomainUnknown[];
+    readonly conflicts: readonly DomainConflict[];
+  };
 }
 
 export interface DomainSearchCandidate {
+  readonly isCurrentVersion?: boolean;
   readonly workspaceId: string;
   readonly domainId: string;
   readonly domainName: string;
@@ -55,6 +66,7 @@ export interface DomainSearchCandidate {
 }
 
 export interface DomainSearchMatch {
+  readonly isCurrentVersion?: boolean;
   readonly domainId: string;
   readonly domainName: string;
   readonly versionId: string;
@@ -98,10 +110,15 @@ interface StoredVersionRow {
   readonly version_id: string;
   readonly model_json: string;
   readonly published_at: string;
+  readonly parent_version_id?: string | null;
+  readonly proposal_id?: string | null;
+  readonly authoring_json?: string | null;
 }
 
 interface StoredSearchRow extends StoredVersionRow {
+  readonly current_version_id?: string | null;
   readonly domain_name: string;
+  readonly catalog_object_json?: string | null;
 }
 
 const INSERT_WORKSPACE = `
@@ -117,9 +134,12 @@ const INSERT_DOMAIN = `
 `;
 
 const SELECT_VERSION = `
-  SELECT workspace_id, domain_id, version_id, model_json, published_at
-  FROM domain_versions
-  WHERE workspace_id = ? AND domain_id = ? AND version_id = ?
+  SELECT v.workspace_id, v.domain_id, v.version_id, v.model_json, v.published_at,
+    v.proposal_id, p.authoring_json, v.parent_version_id
+  FROM domain_versions v
+  LEFT JOIN domain_proposals p ON p.workspace_id = v.workspace_id
+    AND p.domain_id = v.domain_id AND p.version_id = v.version_id AND p.proposal_id = v.proposal_id
+  WHERE v.workspace_id = ? AND v.domain_id = ? AND v.version_id = ?
 `;
 
 const SELECT_SEARCH_VERSIONS = `
@@ -129,17 +149,21 @@ const SELECT_SEARCH_VERSIONS = `
     d.name AS domain_name,
     v.version_id,
     v.model_json,
-    v.published_at
+    v.published_at,
+    h.version_id AS current_version_id, o.payload_json AS catalog_object_json
   FROM domains AS d
   INNER JOIN domain_versions AS v
     ON v.workspace_id = d.workspace_id AND v.domain_id = d.id
+  LEFT JOIN domain_heads h ON h.workspace_id = d.workspace_id AND h.domain_id = d.id
+  LEFT JOIN domain_objects o ON o.workspace_id = v.workspace_id AND o.domain_id = v.domain_id
+    AND o.object_hash = CASE WHEN json_valid(v.model_json) THEN json_extract(v.model_json, '$.hash') ELSE NULL END
   WHERE d.workspace_id = ?
 `;
 
 const INSERT_VERSION = `
   INSERT INTO domain_versions
-    (workspace_id, domain_id, version_id, model_json, published_at)
-  VALUES (?, ?, ?, ?, ?)
+    (workspace_id, domain_id, version_id, model_json, published_at, parent_version_id)
+  VALUES (?, ?, ?, ?, ?, (SELECT version_id FROM domain_heads WHERE workspace_id = ? AND domain_id = ?))
 `;
 
 function identifier(value: string, label: string): string {
@@ -160,7 +184,8 @@ function compareText(left: string, right: string): number {
 }
 
 function compareCandidates(left: DomainSearchCandidate, right: DomainSearchCandidate): number {
-  return compareText(left.domainName, right.domainName)
+  return Number(right.isCurrentVersion === true) - Number(left.isCurrentVersion === true)
+    || compareText(left.domainName, right.domainName)
     || compareText(left.domainId, right.domainId)
     || compareText(left.functionName, right.functionName)
     || compareText(left.functionId, right.functionId)
@@ -202,28 +227,24 @@ function isDuplicateFailure(error: unknown): boolean {
   return error instanceof Error && /unique|constraint/i.test(error.message);
 }
 
-function canonicalVersion(row: StoredVersionRow): DomainVersionRecord {
-  let decoded: unknown;
+async function canonicalVersion(row: StoredVersionRow, reader: DomainObjectReader): Promise<DomainVersionRecord> {
   try {
-    decoded = JSON.parse(row.model_json) as unknown;
-  } catch {
-    throw new DomainRepositoryError('CORRUPT_VERSION', 'Stored domain version is not valid JSON.');
-  }
-  const parsed = parseDomain(decoded);
-  if (!parsed.ok) {
-    throw new DomainRepositoryError(
-      'CORRUPT_VERSION',
-      `Stored domain version failed validation at ${parsed.error.path}.`,
-      parsed.errors,
-    );
-  }
-  return Object.freeze({
-    workspaceId: row.workspace_id,
-    domainId: row.domain_id,
-    versionId: row.version_id,
-    model: parsed.value,
-    publishedAt: row.published_at,
-  });
+    const domain = await reader.readCatalog(row.model_json);
+    let knowledgeIssues: DomainVersionRecord['knowledgeIssues'];
+    let contentHash = snapshotPointer(JSON.parse(row.model_json))?.hash;
+    if (row.proposal_id != null) {
+      const model = await reader.readModel(row.authoring_json ?? 'null', row.version_id);
+      if (stableJsonStringify(model.domain as unknown as JsonValue) !== stableJsonStringify(domain as unknown as JsonValue)) {
+        throw new Error('Authoring snapshot differs from published catalog.');
+      }
+      knowledgeIssues = Object.freeze({ unknowns: model.unknowns, conflicts: model.conflicts });
+      contentHash = snapshotPointer(JSON.parse(row.authoring_json ?? 'null'))?.hash ?? contentHash;
+    }
+    return Object.freeze({ workspaceId: row.workspace_id, domainId: row.domain_id, versionId: row.version_id,
+      model: domain, publishedAt: row.published_at, parentVersionId: row.parent_version_id ?? null,
+      ...(contentHash ? { contentHash } : {}), ...(knowledgeIssues ? { knowledgeIssues } : {}),
+    });
+  } catch { throw new DomainRepositoryError('CORRUPT_VERSION', 'Stored domain snapshot is invalid or incomplete.'); }
 }
 
 export class D1DomainRepository {
@@ -280,13 +301,15 @@ export class D1DomainRepository {
     }
 
     const publishedAt = this.now();
-    const modelJson = JSON.stringify(parsed.value);
+    const packed = await packCatalog(parsed.value);
+    const modelJson = packed.catalogPointer;
     try {
       // D1 batch is atomic: parent creation and version insertion either all
       // commit or none do. The plain INSERT intentionally cannot overwrite.
       await this.db.batch([
         statement(this.db, INSERT_WORKSPACE, workspaceId, publishedAt),
         statement(this.db, INSERT_DOMAIN, workspaceId, domainId, domainId, publishedAt),
+        ...objectStatements(this.db, { workspaceId, domainId }, packed.objects),
         statement(
           this.db,
           INSERT_VERSION,
@@ -295,6 +318,7 @@ export class D1DomainRepository {
           versionId,
           modelJson,
           publishedAt,
+          workspaceId, domainId,
         ),
       ]);
     } catch (error) {
@@ -316,6 +340,7 @@ export class D1DomainRepository {
       versionId,
       model: parsed.value,
       publishedAt,
+      contentHash: packed.hash,
     });
   }
 
@@ -330,7 +355,7 @@ export class D1DomainRepository {
       domainId,
       versionId,
     ).first<StoredVersionRow>();
-    return row === null ? null : canonicalVersion(row);
+    return row === null ? null : canonicalVersion(row, new DomainObjectReader(this.db, { workspaceId, domainId }));
   }
 
   async search(input: SearchDomainInput): Promise<readonly DomainSearchCandidate[]> {
@@ -345,16 +370,20 @@ export class D1DomainRepository {
       // Keep the scope defensive even if a non-D1 test double returns rows it
       // should not have returned for the bound workspace parameter.
       if (row.workspace_id !== workspaceId) continue;
-      const version = canonicalVersion(row);
+      const reader = new DomainObjectReader(this.db, { workspaceId, domainId: row.domain_id });
+      let functions;
+      try { functions = await reader.catalogIndex(row.model_json, row.catalog_object_json); }
+      catch { throw new DomainRepositoryError('CORRUPT_VERSION', 'Stored domain search snapshot is invalid.'); }
       const domainMatches = row.domain_name.toLowerCase().includes(query);
 
-      for (const domainFunction of version.model.functions) {
+      for (const domainFunction of functions) {
         if (!domainMatches
           && !domainFunction.name.toLowerCase().includes(query)
           && !domainFunction.description.toLowerCase().includes(query)) {
           continue;
         }
         candidates.push(Object.freeze({
+          ...(row.current_version_id == null ? {} : { isCurrentVersion: row.version_id === row.current_version_id }),
           workspaceId: row.workspace_id,
           domainId: row.domain_id,
           domainName: row.domain_name,

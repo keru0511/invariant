@@ -1,3 +1,5 @@
+import { compareCanonicalText } from './canonical-order';
+import { parseJsonValue } from './decision-context';
 /**
  * Credential-free orchestration, redaction, recording, and reporting for the
  * live v0 evaluation.  The provider is injected so normal CI remains offline.
@@ -7,6 +9,11 @@ import {
   llmInvariantAdapter,
   llmOnlyAdapter,
   rescoreTrial,
+  scoreResponse,
+  isScoreResult,
+  snapshotEvaluationFixture,
+  EVALUATION_CASE_FAMILIES,
+  EVALUATION_FIXTURE_VERSION,
   type AdapterKind,
   type EvaluationFixture,
   type EvaluationModel,
@@ -112,7 +119,7 @@ function text(value: unknown, field: string): string {
 }
 
 function positiveInteger(value: unknown, field: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be a positive integer.");
   }
   return value;
@@ -136,12 +143,13 @@ function jsonObject(value: unknown, field: string): Readonly<Record<string, unkn
   if (!isRecord(value)) {
     throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be a JSON object.");
   }
-  return Object.freeze({ ...value });
+  try { return parseJsonValue(value, field) as Readonly<Record<string, unknown>>; }
+  catch { throw new LiveEvaluationConfigError('INVALID_CONFIG', field + ' must contain finite, acyclic JSON data.'); }
 }
 
 function caseTargets(value: unknown, field: string): Readonly<Record<string, LiveCaseTarget>> {
   if (!isRecord(value)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + " must be an object keyed by fixture ID.");
-  const result: Record<string, LiveCaseTarget> = {};
+  const result: Record<string, LiveCaseTarget> = Object.create(null);
   for (const [fixtureId, target] of Object.entries(value)) {
     if (!isRecord(target)) throw new LiveEvaluationConfigError("INVALID_CONFIG", field + "." + fixtureId + " must be an object.");
     result[fixtureId] = Object.freeze({
@@ -177,7 +185,7 @@ export function validateLiveEvaluationConfig(value: unknown): LiveEvaluationConf
     domainVersion: text(value.domainVersion, "domainVersion"),
     function: text(value.function, "function"),
     args: jsonObject(value.args, "args"),
-    caseTargets: value.caseTargets === undefined ? {} : caseTargets(value.caseTargets, "caseTargets"),
+    caseTargets: value.caseTargets === undefined ? Object.freeze(Object.create(null)) : caseTargets(value.caseTargets, "caseTargets"),
     timeoutMs: positiveInteger(value.timeoutMs, "timeoutMs"),
   });
 }
@@ -292,7 +300,8 @@ export function applyLiveEvaluationCliOptions(
 }
 
 function targetForFixture(config: LiveEvaluationConfig, fixture: EvaluationFixture): LiveCaseTarget {
-  return config.caseTargets[fixture.id] ?? { domain: config.domain, version: config.domainVersion, function: config.function, args: config.args };
+  return Object.hasOwn(config.caseTargets, fixture.id) ? config.caseTargets[fixture.id]
+    : { domain: config.domain, version: config.domainVersion, function: config.function, args: config.args };
 }
 
 export interface LiveCredentials {
@@ -326,7 +335,7 @@ export function redactForRecording(value: unknown): unknown {
   if (typeof value === "string") return redactText(value);
   if (Array.isArray(value)) return value.map(redactForRecording);
   if (isRecord(value)) {
-    const output: Record<string, unknown> = {};
+    const output: Record<string, unknown> = Object.create(null);
     for (const [key, nested] of Object.entries(value)) {
       output[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : redactForRecording(nested);
     }
@@ -485,6 +494,10 @@ export async function runLiveEvaluation(
   createModel: (adapter: AdapterKind, invariantToolClient?: InvariantToolClient) => EvaluationModel | Promise<EvaluationModel>,
   createInvariantToolClient: () => InvariantToolClient | Promise<InvariantToolClient>,
 ): Promise<readonly LiveTrialArtifact[]> {
+  config = validateLiveEvaluationConfig(config);
+  if (!Array.isArray(fixtures)) throw new Error('Expected an array of evaluation fixtures.');
+  fixtures = Object.freeze(fixtures.map(snapshotEvaluationFixture));
+  if (new Set(fixtures.map((fixture) => fixture.id)).size !== fixtures.length) throw new Error('Duplicate benchmark fixture IDs.');
   const artifacts: LiveTrialArtifact[] = [];
   for (const adapter of [llmOnlyAdapter, llmInvariantAdapter]) {
     let model: EvaluationModel | undefined;
@@ -563,16 +576,30 @@ export function serializeLiveTrial(artifact: LiveTrialArtifact): string {
 }
 
 export function deserializeLiveTrial(serialized: string): LiveTrialArtifact {
-  const value: unknown = JSON.parse(serialized);
+  const value: unknown = parseJsonValue(JSON.parse(serialized), '$');
+  const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+  const episode = (value: unknown) => ['completed', 'missing', 'timeout'].includes(String(value));
+  const score = isRecord(value) ? value.score : undefined;
+  const error = isRecord(value) ? value.error : undefined;
   if (!isRecord(value) ||
       value.version !== LIVE_TRIAL_RECORD_VERSION ||
-      typeof value.trialId !== "string" ||
-      typeof value.fixtureId !== "string" ||
+      !text(value.trialId) || !text(value.fixtureId) ||
+      value.fixtureVersion !== EVALUATION_FIXTURE_VERSION ||
+      !EVALUATION_CASE_FAMILIES.some((family) => family === value.family) ||
       (value.adapter !== "llm-only" && value.adapter !== "llm-invariant") ||
-      typeof value.trialNumber !== "number" ||
-      typeof value.status !== "string" ||
-      !("score" in value) ||
-      !("error" in value)) {
+      typeof value.trialNumber !== "number" || !Number.isSafeInteger(value.trialNumber) || value.trialNumber < 1 ||
+      (!episode(value.status) && value.status !== 'error') ||
+      value.trialId !== `${LIVE_TRIAL_RECORD_VERSION}:${value.adapter}:${value.fixtureId}:trial-${value.trialNumber}` ||
+      !['response', 'rawOutput', 'invariantToolResponse'].every((key) => Object.hasOwn(value, key)) ||
+      !Array.isArray(value.toolCalls) ||
+      (value.request !== null && (!isRecord(value.request) || value.request.adapter !== value.adapter || typeof value.request.prompt !== 'string')) ||
+      (value.invariantToolRequest !== null && (!isRecord(value.invariantToolRequest)
+        || !['workspace', 'domain', 'version', 'function'].every((key) => text((value.invariantToolRequest as Record<string, unknown>)[key]))
+        || !isRecord(value.invariantToolRequest.args))) ||
+      (score !== null && !isScoreResult(score)) ||
+      (error !== null && (!isRecord(error) || typeof error.name !== 'string' || typeof error.message !== 'string')) ||
+      (value.status === 'error' ? error === null || score !== null || value.response !== null
+        : error !== null || score === null || (isRecord(score) && score.episodeStatus !== value.status))) {
     throw new Error("Invalid live trial artifact.");
   }
   return value as unknown as LiveTrialArtifact;
@@ -592,6 +619,8 @@ export interface LiveConditionSummary {
   readonly failed: number;
   readonly points: number;
   readonly passRate: number | null;
+  readonly overallPassRate: number | null;
+  readonly scoringCoverage: number | null;
   readonly labels: Readonly<Record<ScoreLabel, number>>;
 }
 
@@ -698,6 +727,8 @@ function summarize(adapter: AdapterKind, artifacts: readonly LiveTrialArtifact[]
     failed: scored - passed,
     points,
     passRate: scored === 0 ? null : passed / scored,
+    overallPassRate: artifacts.length === 0 ? null : passed / artifacts.length,
+    scoringCoverage: artifacts.length === 0 ? null : scored / artifacts.length,
     labels: Object.freeze(labels),
   });
 }
@@ -724,7 +755,21 @@ export function aggregateLiveReport(
   fixtures: readonly EvaluationFixture[] = OFFLINE_EVALUATION_FIXTURES,
   generatedAt?: string,
 ): LiveReport {
-  const sorted = [...artifacts].sort((left, right) => left.trialId.localeCompare(right.trialId));
+  const fixtureMap = new Map(fixtures.map((fixture) => [fixture.id, fixture]));
+  if (fixtureMap.size !== fixtures.length) throw new Error('Duplicate benchmark fixture IDs.');
+  const seen = new Set<string>();
+  const checked = artifacts.map((input) => {
+    const artifact = deserializeLiveTrial(serializeLiveTrial(input));
+    const fixture = fixtureMap.get(artifact.fixtureId);
+    if (!fixture || fixture.version !== artifact.fixtureVersion || fixture.family !== artifact.family) throw new Error('Trial is outside the declared benchmark.');
+    if (seen.has(artifact.trialId)) throw new Error('Duplicate live trial.');
+    seen.add(artifact.trialId);
+    if (artifact.status === 'error') return artifact;
+    // Persisted score claims are untrusted; the supplied benchmark remains the oracle.
+    const score = scoreResponse(fixture, artifact.response);
+    return Object.freeze({ ...artifact, score, status: score.episodeStatus });
+  });
+  const sorted = checked.sort((left, right) => compareCanonicalText(left.trialId, right.trialId));
   const errors = sorted.filter((item) => item.error !== null).map((item) => ({
     trialId: item.trialId,
     adapter: item.adapter,
@@ -824,12 +869,12 @@ export function renderLiveReportMarkdown(report: LiveReport): string {
     "",
     "## Aggregate",
     "",
-    "| Condition | Trials | Scored | Passed | Errors | Points | Pass rate |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Condition | Trials | Scored | Passed | Errors | Points | Pass/scored | Pass/all trials | Scored/all trials |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const adapter of ["llm-only", "llm-invariant"] as const) {
     const summary = report.conditions[adapter];
-    lines.push("| " + conditionName(adapter) + " | " + summary.total + " | " + summary.scored + " | " + summary.passed + " | " + summary.errors + " | " + summary.points + " | " + percentage(summary.passRate) + " |");
+    lines.push("| " + conditionName(adapter) + " | " + summary.total + " | " + summary.scored + " | " + summary.passed + " | " + summary.errors + " | " + summary.points + " | " + percentage(summary.passRate) + " | " + percentage(summary.overallPassRate) + " | " + percentage(summary.scoringCoverage) + " |");
   }
   lines.push("", "## Per-case", "", "| Case | LLM-only | LLM+Invariant |", "| --- | --- | --- |");
   for (const entry of report.cases) {

@@ -1,0 +1,382 @@
+{
+  "label": "AI-reference-based exploratory evaluation; not human gold",
+  "valid_paired_cases": 5,
+  "planned_cases": 6,
+  "transport_failed_case": "JP01, both revision arms; excluded only from conditional accuracy comparison, retained in completion counts",
+  "limits": [
+    "Purpose-selected small sample; not representative or statistically independent tasks.",
+    "Reference disagreements and canonical granularity affect scores. Unmatched does not necessarily mean hallucinated.",
+    "Unsupported-attribute tallies in details cover matched units only; unmatched predictions require separate semantic review.",
+    "No explicit withdrawal examples; no claimed withdrawal robustness."
+  ],
+  "execution": {
+    "planned_model_calls": 18,
+    "ended_model_calls": 18,
+    "valid_extractions": 16,
+    "transport_failures": 2,
+    "retries": 0,
+    "mechanical_check_passes": 16,
+    "human_adjudication": false,
+    "backend_revision": null,
+    "tokens": null,
+    "cost": null
+  },
+  "primary": {
+    "draft": {
+      "ranges": {
+        "gold": {
+          "min": 14,
+          "max": 16
+        },
+        "predicted": {
+          "min": 19,
+          "max": 19
+        },
+        "tp": {
+          "min": 14,
+          "max": 15
+        },
+        "fp": {
+          "min": 4,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 1
+        },
+        "precision": {
+          "min": 0.7368421052631579,
+          "max": 0.7894736842105263
+        },
+        "recall": {
+          "min": 0.9333333333333333,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.8235294117647058,
+          "max": 0.8823529411764706
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 34,
+        "detected_units": 32,
+        "recall": 0.9411764705882353,
+        "normalized_predicted_units": 44
+      },
+      "matched_subset_counts": {
+        "candidate_count": 44,
+        "matched_reference_units": 32,
+        "missed_reference_units": 2,
+        "unmatched_candidates": 12,
+        "matched_action_incomplete": 7,
+        "matched_status_unsupported": 1,
+        "matched_owner_unsupported": 0,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 3
+      }
+    },
+    "A": {
+      "ranges": {
+        "gold": {
+          "min": 14,
+          "max": 16
+        },
+        "predicted": {
+          "min": 19,
+          "max": 19
+        },
+        "tp": {
+          "min": 14,
+          "max": 14
+        },
+        "fp": {
+          "min": 5,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 2
+        },
+        "precision": {
+          "min": 0.7368421052631579,
+          "max": 0.7368421052631579
+        },
+        "recall": {
+          "min": 0.875,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.8,
+          "max": 0.8484848484848485
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 34,
+        "detected_units": 33,
+        "recall": 0.9705882352941176,
+        "normalized_predicted_units": 49
+      },
+      "matched_subset_counts": {
+        "candidate_count": 49,
+        "matched_reference_units": 33,
+        "missed_reference_units": 1,
+        "unmatched_candidates": 16,
+        "matched_action_incomplete": 8,
+        "matched_status_unsupported": 2,
+        "matched_owner_unsupported": 1,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 3
+      }
+    },
+    "B": {
+      "ranges": {
+        "gold": {
+          "min": 14,
+          "max": 16
+        },
+        "predicted": {
+          "min": 19,
+          "max": 19
+        },
+        "tp": {
+          "min": 14,
+          "max": 15
+        },
+        "fp": {
+          "min": 4,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 1
+        },
+        "precision": {
+          "min": 0.7368421052631579,
+          "max": 0.7894736842105263
+        },
+        "recall": {
+          "min": 0.9333333333333333,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.8235294117647058,
+          "max": 0.8823529411764706
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 34,
+        "detected_units": 32,
+        "recall": 0.9411764705882353,
+        "normalized_predicted_units": 48
+      },
+      "matched_subset_counts": {
+        "candidate_count": 48,
+        "matched_reference_units": 32,
+        "missed_reference_units": 2,
+        "unmatched_candidates": 16,
+        "matched_action_incomplete": 6,
+        "matched_status_unsupported": 1,
+        "matched_owner_unsupported": 0,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 2
+      }
+    },
+    "paired_B_minus_A": {
+      "precision": {
+        "min": 0.0,
+        "max": 0.052631578947368474
+      },
+      "recall": {
+        "min": 0.0,
+        "max": 0.06666666666666665
+      },
+      "f1": {
+        "min": 0.0,
+        "max": 0.05882352941176472
+      }
+    }
+  },
+  "hierarchical_sensitivity": {
+    "draft": {
+      "ranges": {
+        "gold": {
+          "min": 12,
+          "max": 14
+        },
+        "predicted": {
+          "min": 17,
+          "max": 17
+        },
+        "tp": {
+          "min": 12,
+          "max": 13
+        },
+        "fp": {
+          "min": 4,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 1
+        },
+        "precision": {
+          "min": 0.7058823529411765,
+          "max": 0.7647058823529411
+        },
+        "recall": {
+          "min": 0.9230769230769231,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.8,
+          "max": 0.8666666666666667
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 32,
+        "detected_units": 30,
+        "recall": 0.9375,
+        "normalized_predicted_units": 42
+      },
+      "matched_subset_counts": {
+        "candidate_count": 44,
+        "matched_reference_units": 32,
+        "missed_reference_units": 2,
+        "unmatched_candidates": 12,
+        "matched_action_incomplete": 7,
+        "matched_status_unsupported": 1,
+        "matched_owner_unsupported": 0,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 3
+      }
+    },
+    "A": {
+      "ranges": {
+        "gold": {
+          "min": 12,
+          "max": 14
+        },
+        "predicted": {
+          "min": 17,
+          "max": 17
+        },
+        "tp": {
+          "min": 12,
+          "max": 12
+        },
+        "fp": {
+          "min": 5,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 2
+        },
+        "precision": {
+          "min": 0.7058823529411765,
+          "max": 0.7058823529411765
+        },
+        "recall": {
+          "min": 0.8571428571428571,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.7741935483870968,
+          "max": 0.8275862068965517
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 32,
+        "detected_units": 31,
+        "recall": 0.96875,
+        "normalized_predicted_units": 47
+      },
+      "matched_subset_counts": {
+        "candidate_count": 49,
+        "matched_reference_units": 33,
+        "missed_reference_units": 1,
+        "unmatched_candidates": 16,
+        "matched_action_incomplete": 8,
+        "matched_status_unsupported": 2,
+        "matched_owner_unsupported": 1,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 3
+      }
+    },
+    "B": {
+      "ranges": {
+        "gold": {
+          "min": 12,
+          "max": 14
+        },
+        "predicted": {
+          "min": 17,
+          "max": 17
+        },
+        "tp": {
+          "min": 12,
+          "max": 13
+        },
+        "fp": {
+          "min": 4,
+          "max": 5
+        },
+        "fn": {
+          "min": 0,
+          "max": 1
+        },
+        "precision": {
+          "min": 0.7058823529411765,
+          "max": 0.7647058823529411
+        },
+        "recall": {
+          "min": 0.9230769230769231,
+          "max": 1.0
+        },
+        "f1": {
+          "min": 0.8,
+          "max": 0.8666666666666667
+        }
+      },
+      "all_state_detection": {
+        "reference_units": 32,
+        "detected_units": 30,
+        "recall": 0.9375,
+        "normalized_predicted_units": 46
+      },
+      "matched_subset_counts": {
+        "candidate_count": 48,
+        "matched_reference_units": 32,
+        "missed_reference_units": 2,
+        "unmatched_candidates": 16,
+        "matched_action_incomplete": 6,
+        "matched_status_unsupported": 1,
+        "matched_owner_unsupported": 0,
+        "matched_deadline_unsupported": 2,
+        "matched_evidence_semantics_unsupported": 2
+      }
+    },
+    "paired_B_minus_A": {
+      "precision": {
+        "min": 0.0,
+        "max": 0.05882352941176461
+      },
+      "recall": {
+        "min": 0.0,
+        "max": 0.07692307692307687
+      },
+      "f1": {
+        "min": 0.0,
+        "max": 0.06666666666666665
+      }
+    }
+  },
+  "reference_limits": [
+    "The fixed AI reference has possible omissions of supported candidates and an owner; unmatched predictions include faithful fragments, not only errors.",
+    "Raw sources and long quoted outputs are retained locally rather than republished. This public aggregate cannot alone reproduce semantic adjudication.",
+    "Ranges represent predeclared interpretation alternatives, not statistical confidence intervals.",
+    "A status/owner unsupported-count increases partly reflect remapping a nearly unchanged candidate after adding another candidate, not proven newly introduced errors.",
+    "The two shared temporal errors are mapped-reference errors; A also has an unmatched duplicate temporal error.",
+    "Under the singleton-committed interpretation, all three arms have identical F1 of 0.8484848484848485."
+  ]
+}

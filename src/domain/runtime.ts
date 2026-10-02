@@ -1,3 +1,7 @@
+import { isDomainInputPath, inputPathsOverlap } from './input-path';
+import { MAX_JSON_VALUE_DEPTH } from './decision-context';
+import { compareCanonicalText } from './canonical-order';
+import { isDomainNumber } from './numeric';
 /**
  * Runtime validation for the dependency-free Domain v0 JSON contract.
  *
@@ -43,7 +47,10 @@ export interface DomainCatalog {
 
 export type Domain = DomainCatalog;
 
+export const MAX_DOMAIN_EXPRESSION_DEPTH = 128 as const;
+
 export const DOMAIN_PARSE_ERROR_CODES = [
+  'RECURSION_LIMIT',
   'INVALID_SHAPE',
   'MISSING_FIELD',
   'INVALID_DISCRIMINATOR',
@@ -112,6 +119,7 @@ interface ParseContext {
 interface InternalParser {
   readonly context: ParseContext;
   readonly activeObjects: WeakSet<object>;
+  depth: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -256,14 +264,14 @@ function readFiniteNumber(
 ): DomainParseResult<number> {
   const value = readField(record, key, path);
   if (isFailure(value)) return failure(value.error);
-  if (typeof value.value !== 'number' || !Number.isFinite(value.value)) {
+  if (!isDomainNumber(value.value)) {
     const fieldPath = childPath(path, key);
     return failure(
       makeError(
         'INVALID_VALUE',
         fieldPath,
-        "Expected a finite number at '" + fieldPath + "', got " + actualType(value.value) + '.',
-        'finite number',
+        "Expected a finite number within the safe integer range at '" + fieldPath + "', got " + actualType(value.value) + '.',
+        'finite number with safe integer precision',
         actualType(value.value),
       ),
     );
@@ -329,7 +337,7 @@ function readPath(
 ): DomainParseResult<string> {
   const value = readNonEmptyString(record, key, path);
   if (isFailure(value)) return value;
-  if (!/^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$/.test(value.value)) {
+  if (!isDomainInputPath(value.value)) {
     const fieldPath = childPath(path, key);
     return failure(
       makeError(
@@ -411,14 +419,15 @@ function isDomainScalar(value: unknown): value is DomainScalar {
     value === null ||
     typeof value === 'boolean' ||
     typeof value === 'string' ||
-    (typeof value === 'number' && Number.isFinite(value))
+    isDomainNumber(value)
   );
 }
 
-function isJsonValue(value: unknown, active: WeakSet<object>): value is DomainJsonValue {
+function isJsonValue(value: unknown, active: WeakSet<object>, depth = 0): value is DomainJsonValue {
+  if (depth > MAX_JSON_VALUE_DEPTH) return false;
   if (value === null) return true;
   if (typeof value === 'boolean' || typeof value === 'string') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'number') return isDomainNumber(value);
   if (typeof value !== 'object') return false;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null && !Array.isArray(value)) return false;
@@ -427,14 +436,14 @@ function isJsonValue(value: unknown, active: WeakSet<object>): value is DomainJs
   let valid = true;
   if (Array.isArray(value)) {
     for (const item of value) {
-      if (!isJsonValue(item, active)) {
+      if (!isJsonValue(item, active, depth + 1)) {
         valid = false;
         break;
       }
     }
   } else {
     for (const item of Object.values(value)) {
-      if (!isJsonValue(item, active)) {
+      if (!isJsonValue(item, active, depth + 1)) {
         valid = false;
         break;
       }
@@ -504,6 +513,9 @@ function parseInputDefinition(
       ),
     );
   }
+  if (context.inputTypes && [...context.inputTypes.keys()].some((existing) => inputPathsOverlap(existing, inputPath.value))) {
+    return failure(makeError('INVALID_SCOPE', childPath(path, 'path'), 'An input cannot be both a scalar leaf and an object parent.'));
+  }
   context.inputTypes?.set(inputPath.value, inputType.value);
   return success(
     Object.freeze({
@@ -519,12 +531,16 @@ function parseExpressionValue(
   path: string,
   parser: InternalParser,
 ): DomainParseResult<ParsedExpression> {
+  if (parser.depth > MAX_DOMAIN_EXPRESSION_DEPTH) {
+    return failure(makeError('RECURSION_LIMIT', path, 'Expression nesting exceeds the evaluation limit.'));
+  }
   const record = readRecord(value, path);
   if (isFailure(record)) return record;
   if (parser.activeObjects.has(record.value)) {
     return failure(makeError('CIRCULAR_REFERENCE', path, "Circular expression reference at '" + path + "'."));
   }
   parser.activeObjects.add(record.value);
+  parser.depth += 1;
   try {
     const kindValue = readString(record.value, 'kind', path);
     if (isFailure(kindValue)) return kindValue;
@@ -722,6 +738,7 @@ function parseExpressionValue(
     return success({ node, type: 'boolean' });
   } finally {
     parser.activeObjects.delete(record.value);
+    parser.depth -= 1;
   }
 }
 
@@ -729,6 +746,7 @@ export function parseExpression(value: unknown): DomainParseResult<DomainExpress
   const parser: InternalParser = {
     context: { identifiers: new Set<string>() },
     activeObjects: new WeakSet<object>(),
+    depth: 0,
   };
   const parsed = parseExpressionValue(value, '$', parser);
   if (isFailure(parsed)) return parsed;
@@ -920,6 +938,7 @@ function parseFunctionValue(
   const parser: InternalParser = {
     context,
     activeObjects: new WeakSet<object>(),
+    depth: 0,
   };
   const policy = parsePolicy(record.value.policy, childPath(path, 'policy'), parser);
   if (isFailure(policy)) return policy;
@@ -1445,7 +1464,7 @@ function evaluateFunction(
   const decisions = new Set(highest.map((candidate) => candidate.rule.then));
   const matchedRuleIds = highest
     .map((candidate) => candidate.rule.id)
-    .sort((left, right) => decisions.size === 1 ? left.localeCompare(right) : 0);
+    .sort((left, right) => decisions.size === 1 ? compareCanonicalText(left, right) : 0);
   if (decisions.size > 1) {
     return {
       status: 'conflict',
@@ -1515,7 +1534,7 @@ function stableErrors(errors: readonly DomainParseError[]): readonly DomainParse
     unique.set(key, error);
   }
   return Object.freeze([...unique.values()].sort((left, right) =>
-    left.path.localeCompare(right.path) || left.code.localeCompare(right.code) || left.message.localeCompare(right.message),
+    compareCanonicalText(left.path, right.path) || compareCanonicalText(left.code, right.code) || compareCanonicalText(left.message, right.message),
   ));
 }
 

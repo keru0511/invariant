@@ -1,3 +1,5 @@
+import { compareCanonicalText } from './canonical-order';
+import { isDomainNumber } from './numeric';
 /**
  * Pure, deterministic evaluation for the Domain v0 contract.
  *
@@ -21,11 +23,12 @@ import {
   type DomainRule,
   type DomainTraceEvent,
 } from './contract';
-import { parseDomain, type Domain } from './runtime';
+import { parseDomain, MAX_DOMAIN_EXPRESSION_DEPTH, type Domain } from './runtime';
 
-export const MAX_EVALUATION_DEPTH = 128 as const;
+export const MAX_EVALUATION_DEPTH = MAX_DOMAIN_EXPRESSION_DEPTH;
 
 export const EVALUATION_ERROR_CODES = [
+  'DOMAIN_KNOWLEDGE_INCOMPLETE',
   'INVALID_DOMAIN',
   'INVALID_FUNCTION',
   'INVALID_ARGS',
@@ -96,7 +99,9 @@ function error(
   message: string,
   details: Omit<EvaluationError, 'code' | 'message'> = {},
 ): EvaluationError {
-  return freeze({ code, message, ...details });
+  return freeze({ code, message, ...details,
+    ...(details.ruleIds === undefined ? {} : { ruleIds: freeze([...details.ruleIds]) }),
+  });
 }
 
 function traceId(domainFunction: DomainFunction, suffix: string): string {
@@ -196,6 +201,10 @@ function argumentErrors(domainFunction: DomainFunction, args: unknown): Argument
       return;
     }
     if (value === null || typeof value !== 'object') {
+      if (typeof value === 'number' && !isDomainNumber(value)) {
+        errors.push(error('INVALID_ARGS', "Input at '" + path + "' must be finite and preserve safe integer precision.", { path }));
+        return;
+      }
       const declaration = declared.get(path);
       if (!declaration) {
         errors.push(error('INVALID_ARGS', "Unknown argument path '" + path + "'.", { path }));
@@ -578,7 +587,7 @@ function evaluateFunction(context: EvaluationContext): EvaluationResult {
   const decisions = new Set(highest.map((candidate) => candidate.rule.then));
   const matchedRuleIds = highest
     .map((candidate) => candidate.rule.id)
-    .sort((left, right) => decisions.size === 1 ? left.localeCompare(right) : 0);
+    .sort((left, right) => decisions.size === 1 ? compareCanonicalText(left, right) : 0);
   if (decisions.size > 1) {
     const conflict = error(
       'RULE_CONFLICT',
@@ -617,7 +626,7 @@ function evaluateFunction(context: EvaluationContext): EvaluationResult {
 
 function invalidDomainResult(parsed: ReturnType<typeof parseDomain>): EvaluationResult {
   if (parsed.ok) return result('error');
-  const code: EvaluationErrorCode = parsed.error.code === 'CIRCULAR_REFERENCE' ? 'CYCLE_DETECTED' : 'INVALID_DOMAIN';
+  const code: EvaluationErrorCode = parsed.error.code === 'CIRCULAR_REFERENCE' ? 'CYCLE_DETECTED' : parsed.error.code === 'RECURSION_LIMIT' ? 'RECURSION_LIMIT' : 'INVALID_DOMAIN';
   return result('error', undefined, {
     errors: [error(code, parsed.error.message, { path: parsed.error.path })],
   });

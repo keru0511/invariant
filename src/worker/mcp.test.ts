@@ -991,3 +991,61 @@ describe('MCP ハンドラー (/mcp)', () => {
     expect(repository.calls).toEqual([{ operation: 'authorize', workspaceId: 'workspace-b' }]);
   });
 });
+
+describe('MCP numeric overflow boundary', () => {
+  it('rejects a JSON exponent overflow over the actual MCP parser', async () => {
+    const template = createModernRequest({ method: 'tools/call', name: 'domain.evaluate', params: {
+      name: 'domain.evaluate', arguments: { workspace: 'workspace-a', domain: 'orders', version: 'v1', function: 'member-age', args: { user: { age: 12345 } } },
+    } });
+    const wire = (await template.text()).replace('12345', '1e999');
+    const response = await handleMcpRequest(new Request(template.url, { method: 'POST', headers: template.headers, body: wire }), TEST_ENV, {
+      accessVerifier: { verify: async () => TEST_PRINCIPAL }, workspaceRepository: createFakeWorkspaceRepository(),
+    });
+    const result = await readToolResult(response);
+    expect(result.status).toBe('error');
+    expect(result.value).toBeNull();
+    expect(result.decision).toBeUndefined();
+    expect(result.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'INVALID_ARGS' })]));
+  });
+});
+
+it('exposes the grounded-answer workflow during modern server discovery', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'server/discover' }), TEST_ENV);
+  const body = await response.json() as { result: { instructions?: string } };
+  expect(body.result.instructions).toContain('Never invent input facts');
+  expect(body.result.instructions).toContain('unresolved, ambiguous, conflict, or error');
+  expect(body.result.instructions).toContain('explicit human approval');
+});
+
+it('provides exact arithmetic through MCP without using storage or a provider', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.evaluate', params: {
+    name: 'calculation.evaluate', arguments: { version: 'calculation-v1', operation: 'add', left: '0.1', right: '0.2' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'ok', functionId: 'decimal.add@1',
+    result: { numerator: '3', denominator: '10', decimal: '0.3' }, scope: 'arithmetic_for_supplied_inputs' });
+});
+
+it('does not turn a zero baseline into a made-up percentage through MCP', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.evaluate', params: {
+    name: 'calculation.evaluate', arguments: { version: 'calculation-v1', operation: 'percentage_change', from: '0', to: '10' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'error', error: { code: 'INVALID_BASELINE' } });
+});
+
+it('detects a rounded answer incorrectly claimed as exact through MCP', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'calculation.verify', params: {
+    name: 'calculation.verify', arguments: {
+      request: { version: 'calculation-v1', operation: 'divide', left: '1', right: '3' },
+      claim: { kind: 'exact_fraction', functionId: 'decimal.divide@1', numerator: '33', denominator: '100' },
+    },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'mismatch', scope: 'numeric_claim_for_supplied_request',
+    expected: { result: { numerator: '1', denominator: '3', decimal: null } } });
+});
+
+it('checks a literal quote through MCP without claiming factual verification', async () => {
+  const response = await handleMcpRequest(createModernRequest({ method: 'tools/call', name: 'evidence.match_quote', params: {
+    name: 'evidence.match_quote', arguments: { version: 'quote-evidence-v1', source: { id: 'synthetic', version: 'v1', text: '料金は未確定。' }, quote: '料金は確定。' },
+  } }), TEST_ENV);
+  expect(await readToolResult(response)).toMatchObject({ status: 'not_found', scope: 'literal_quote_in_supplied_text', source: { origin: 'caller_supplied' } });
+});

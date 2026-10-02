@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "purpose": "固定された実モデル初稿に対する検証・1回修正の効果を比較する。A/Bに同じ原文・スキーマ・本規則を渡す。",
+  "evidence_contract": {
+    "source": "各ケースのtextフィールド由来のparagraphs内、指定paragraph_idのtextのみ。contextは担当者や期限の根拠として引用しない。",
+    "format": {
+      "paragraph_id": "ケース内の正確な段落ID",
+      "quote": "指定段落内の原文完全一致の連続文字列。省略・整形・要約は禁止。"
+    },
+    "normalization": "CRLF/CRをLFへ置換する以外は一切変更しない",
+    "position": "paragraphsの原文順と引用位置を用いる。同じ段落で同一文字列が複数回ある場合は引用を長くして一意にする。",
+    "meaning": "引用一致は文字列の存在しか保証しない。type、同一タスク性、担当者、期限との意味関係は独立評価する。"
+  },
+  "extraction_rules": [
+    {
+      "id": "R01",
+      "text": "具体的な動作・成果物のある提案、依頼、実施計画、受諾、実施決定、完了を候補として拾う。会議中の発言・説明依頼、一般理念、具体的動作を含まない感想は対象外。完了済みの具体的事業行為はcompleted候補として保持する。"
+    },
+    {
+      "id": "R02",
+      "text": "一候補は独立して実行・完了判定できる一行為。同じ行為の提案→依頼→受諾等は一候補内のeventsにまとめる。独立行為は分割し、重複を避ける。"
+    },
+    {
+      "id": "R03",
+      "text": "提案はproposal、依頼はrequest、明確な引受けや実施予定の表明はacceptance、肯定的な実施決定はdecision。依頼だけで合意成立としない。検討するとの受諾は検討タスクであり、施策実施の受諾ではない。"
+    },
+    {
+      "id": "R04",
+      "text": "現時点で実行が明確に予定・受諾・決定されている行為をcommittedとする。担当者や期限が不明でも行為の確定が明確ならcommittedにできる。"
+    },
+    {
+      "id": "R05",
+      "text": "ownerには原文で明示された氏名・部署・役割名だけを入れる。計画の担当部署が文脈で明示される場合は役割名も可。話者であることだけから担当者と推測しない。引受け主体はaccepted_self、明示的担当割当・計画の担当主体はexplicitly_assigned、依頼宛先だけならmerely_addressed。"
+    },
+    {
+      "id": "R06",
+      "text": "merely_addressedは合意済み責任者ではない。原文で名称を特定できなければowner.value=null、basisはunstatedまたはambiguousとする。non-nullの名称はowner.evidence引用中に同一表記で存在する必要がある。"
+    },
+    {
+      "id": "R07",
+      "text": "deadline.raw_textはその行為に対応する期限・時期の原文表現をそのまま保持する。期限なしならnull。normalized_dateは今回常にnull。別の会議日や周囲の日付を勝手に納期へ流用しない。"
+    },
+    {
+      "id": "R08",
+      "text": "期限や時期が確定納期ならmodality=firm、目標・目途等ならtarget、明示なしまたは判断不能ならunspecified。『令和8年度内を目標』を確定納期に格上げしない。raw_textには目標・予定など判断に必要な修飾も保持する。目標時期がある実施計画は、それだけで実施自体が未確定になるわけではない。"
+    },
+    {
+      "id": "R09",
+      "text": "deadline.basisは暦を直接示す表現ならexplicit_absolute、会議時点等の基準に依存する表現ならexplicit_relative、記載なしならunstated、対応が曖昧ならambiguous。年度表記もexplicit_absoluteでよいが日付へ変換しない。"
+    },
+    {
+      "id": "R10",
+      "text": "保留・撤回・完了は同じ行為を指すときだけ適用する。部分撤回は該当部分だけ。後続の明確な再受諾や再決定は再開として扱う。単語一致や最新発言という理由だけで他のタスクを撤回しない。"
+    },
+    {
+      "id": "R11",
+      "text": "意味・対象・関係が不明ならuncertaintyに具体的理由を記す。状態を決められない場合はunresolved。明確な行為を不要に保留・不明扱いしない。"
+    },
+    {
+      "id": "R12",
+      "text": "action、各event、owner、deadlineそれぞれに根拠引用を付ける。根拠がない属性は推測しない。引用一致やチェッカー合格は意味的正しさを証明しない。"
+    }
+  ],
+  "state_consistency_rules": [
+    "最初のproposalはproposed、最初のrequestおよびproposed後のrequestはrequested。",
+    "acceptanceまたは肯定的実施decisionはcommitted。holdはon_hold、withdrawalはwithdrawn、completionはcompleted。",
+    "committed/on_hold/withdrawn/completed後のproposal/requestは状態を自動上書きしない。再開・対象変更の可能性としてwarningにする。",
+    "on_hold/withdrawn/completed後のacceptance/decisionは再開の可能性をwarningにし、その意味は原文で確認する。",
+    "unclearイベントは機械的な確定状態に変換しない。final_status=unresolvedまたは具体的なuncertaintyを求める。",
+    "宣言イベントから得る状態とfinal_statusの矛盾を報告する。ただしunresolvedかつ理由ありは許容する。これは宣言間の整合検査であり意味認定ではない。"
+  ],
+  "checker_contract": {
+    "inputs": "ケース原文、JSON出力、本公開規則のみ。正解、oracle、資料固有の正解パッチは使わない。",
+    "hard_checks": [
+      "JSON型・必須欄・列挙値・一意candidate_id・source_id/case_id一致",
+      "全引用の指定paragraph_id内での原文完全一致",
+      "イベント原文位置順（位置が一意の場合）",
+      "non-null owner名が対応引用中に存在",
+      "non-null deadline.raw_textが対応引用中に存在",
+      "null値とunstated/basis/空引用の宣言間整合",
+      "normalized_dateは常にnull",
+      "宣言イベントと最終状態の内部整合"
+    ],
+    "warning_terms": [
+      "保留",
+      "中止",
+      "撤回",
+      "見送り",
+      "変更",
+      "目標",
+      "目途"
+    ],
+    "warnings": "同一/包含引用の重複候補、上記表現の未説明、依頼と合意済み担当の混同候補を注意喚起できる。単語だけで意味ラベルを自動作成しない。",
+    "output": "candidate_id、rule_id、error/warning、位置または引用、理由。自動削除や確定・撤回はしない。"
+  },
+  "primary_output_filter": "実行タスク一覧はfinal_status=committedのみ。他状態も候補としてJSONに保存し、見落とし・過剰保留を独立評価する。",
+  "limitations": "今回選定文書では明示的な撤回は未確認。撤回処理の改善は未検証。候補検出・意味判断は決定的チェッカーでは保証しない。"
+}

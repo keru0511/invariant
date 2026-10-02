@@ -358,3 +358,28 @@ describe('Domain v0 runtime validation', () => {
   });
 
 });
+
+it('rejects excessive fixture JSON nesting without throwing a stack overflow', () => {
+  let value: unknown = true;
+  for (let i = 0; i < 10000; i++) value = { nested: value };
+  const fixture = { ...memberAgeBoundary, input: { user: value } };
+  expect(() => parseGoldenFixture(fixture)).not.toThrow();
+  expect(parseGoldenFixture(fixture).ok).toBe(false);
+});
+
+it.each([false, true])('rejects input paths that must be both a scalar and an object (parent first: %s)', (parentFirst) => {
+  const domain = structuredClone(functionCatalog);
+  const child = domain.functions[0].inputs[0];
+  const parent = { path: 'user', type: 'number', required: true };
+  domain.functions[0].inputs = parentFirst ? [parent, child] : [child, parent];
+  const result = parseDomain(domain);
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.error.code).toBe('INVALID_SCOPE');
+});
+
+it('keeps sibling paths and similarly named leaves valid', () => {
+  const domain = structuredClone(functionCatalog);
+  domain.functions[0].inputs.push({ path: 'user.age_limit', type: 'number', required: false });
+  domain.functions[0].inputs.push({ path: 'user.name', type: 'string', required: false });
+  expect(parseDomain(domain).ok).toBe(true);
+});

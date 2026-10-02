@@ -1,0 +1,448 @@
+{
+  "scope": "Exploratory internal-model pilot; not a ChatGPT product test",
+  "backendRevision": "not independently exposed",
+  "repetitionsPerCase": 1,
+  "programSourceSha256": "b0a4f037db18a20d58b4364494367959ab157821f2030a8af009e955dc9bd83f",
+  "summaries": {
+    "A": {
+      "planned": 12,
+      "completed": 12,
+      "finalStructuredMatches": 12,
+      "conversationStructuredMatches": 12,
+      "programUseCompliant": null
+    },
+    "B": {
+      "planned": 12,
+      "completed": 12,
+      "finalStructuredMatches": 12,
+      "conversationStructuredMatches": 12,
+      "programUseCompliant": 12
+    }
+  },
+  "scores": [
+    {
+      "caseId": "dev-48h",
+      "split": "development",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-48h",
+      "split": "development",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-24h-odd",
+      "split": "development",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-24h-odd",
+      "split": "development",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-12h",
+      "split": "development",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-12h",
+      "split": "development",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-organizer",
+      "split": "development",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "dev-organizer",
+      "split": "development",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-below-48h",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-below-48h",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-below-24h",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-below-24h",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-organizer-at-start",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-organizer-at-start",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-organizer",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-organizer",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-time",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-time",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-price",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-missing-price",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-implementation-pressure",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true,
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-implementation-pressure",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true,
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1,
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-policy-change-proposal",
+      "split": "reserved-evaluation",
+      "condition": "B",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true,
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [
+        1,
+        1
+      ],
+      "programUseCompliant": true,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    },
+    {
+      "caseId": "eval-policy-change-proposal",
+      "split": "reserved-evaluation",
+      "condition": "A",
+      "status": "completed",
+      "complete": true,
+      "turnStructuredMatches": [
+        true,
+        true
+      ],
+      "finalStructuredMatch": true,
+      "conversationStructuredMatch": true,
+      "evaluationsByTurn": [],
+      "programUseCompliant": null,
+      "programEvidenceIssues": [],
+      "fullProseReview": "separate_review_not_scored_here"
+    }
+  ],
+  "fullAnswerAccuracy": null,
+  "cost": null,
+  "tokens": null,
+  "modelLatencyMs": null,
+  "limits": [
+    "Structured correctness does not certify prose.",
+    "Provider latency and usage are not exposed; orchestration wall time is not model latency.",
+    "No statistical improvement claim from this small pilot.",
+    "Condition A was instructed not to use tools; this was not a tools-disabled API boundary."
+  ]
+}

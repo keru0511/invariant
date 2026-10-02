@@ -16,12 +16,15 @@ interface DomainRow {
   readonly created_at: string;
 }
 
+interface ObjectRow { readonly workspace_id: string; readonly domain_id: string; readonly object_hash: string; readonly payload_json: string; }
+
 interface VersionRow {
   readonly workspace_id: string;
   readonly domain_id: string;
   readonly version_id: string;
   readonly model_json: string;
   readonly published_at: string;
+  readonly parent_version_id: string | null;
 }
 
 type Row = WorkspaceRow | WorkspaceMembershipRow | DomainRow | VersionRow | { readonly present: 1 };
@@ -88,6 +91,7 @@ export class FakeD1Database {
   private memberships = new Map<string, WorkspaceMembershipRow>();
   private domains = new Map<string, DomainRow>();
   private versions = new Map<string, VersionRow>();
+  private objects = new Map<string, ObjectRow>();
   private failAfterStatement: number | undefined;
 
   prepare(sql: string): FakeD1PreparedStatement {
@@ -122,9 +126,10 @@ export class FakeD1Database {
     this.failAfterStatement = statementIndex;
   }
 
-  count(table: 'workspaces' | 'domains' | 'domain_versions'): number {
+  count(table: 'workspaces' | 'domains' | 'domain_versions' | 'domain_objects'): number {
     if (table === 'workspaces') return this.workspaces.size;
     if (table === 'domains') return this.domains.size;
+    if (table === 'domain_objects') return this.objects.size;
     return this.versions.size;
   }
 
@@ -134,6 +139,7 @@ export class FakeD1Database {
     cloned.memberships = new Map(this.memberships);
     cloned.domains = new Map(this.domains);
     cloned.versions = new Map(this.versions);
+    cloned.objects = new Map(this.objects);
     return cloned;
   }
 
@@ -142,6 +148,7 @@ export class FakeD1Database {
     this.memberships = source.memberships;
     this.domains = source.domains;
     this.versions = source.versions;
+    this.objects = source.objects;
   }
 
   async run(sql: string, values: readonly unknown[]): Promise<ReturnType<typeof result>> {
@@ -167,6 +174,10 @@ export class FakeD1Database {
     readonly meta: Record<string, unknown>;
   }> {
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized.includes('from domain_objects')) {
+      const hashes = new Set(values.slice(2).map(String));
+      return result([...this.objects.values()].filter((row) => row.workspace_id === values[0] && row.domain_id === values[1] && hashes.has(row.object_hash)) as T[]);
+    }
     if (normalized.includes('from domains as d') && normalized.includes('inner join domain_versions as v')) {
       const workspaceId = String(values[0]);
       const rows = [...this.versions.values()]
@@ -183,6 +194,9 @@ export class FakeD1Database {
             version_id: version.version_id,
             model_json: version.model_json,
             published_at: version.published_at,
+            catalog_object_json: this.objects.get(key(version.workspace_id, version.domain_id, String(JSON.parse(version.model_json).hash)))?.payload_json ?? null,
+            // Emulate the AFTER INSERT head trigger, not lexical version order.
+            current_version_id: [...this.versions.values()].filter((entry) => entry.workspace_id === version.workspace_id && entry.domain_id === version.domain_id).at(-1)?.version_id,
           };
         });
       return result(rows as T[]);
@@ -223,6 +237,15 @@ export class FakeD1Database {
       this.domains.set(rowKey, this.domains.get(rowKey) ?? row);
       return result();
     }
+    if (normalized.startsWith('insert into domain_objects')) {
+      for (let index = 0; index < values.length; index += 4) {
+        const row: ObjectRow = { workspace_id: String(values[index]), domain_id: String(values[index + 1]), object_hash: String(values[index + 2]), payload_json: String(values[index + 3]) };
+        if (!this.domains.has(key(row.workspace_id, row.domain_id))) throw new Error('FOREIGN KEY constraint failed: domain_objects.domain');
+        const rowKey = key(row.workspace_id, row.domain_id, row.object_hash);
+        if (!this.objects.has(rowKey)) this.objects.set(rowKey, row);
+      }
+      return result();
+    }
     if (normalized.startsWith('insert into domain_versions')) {
       const row: VersionRow = {
         workspace_id: String(values[0]),
@@ -230,6 +253,7 @@ export class FakeD1Database {
         version_id: String(values[2]),
         model_json: String(values[3]),
         published_at: String(values[4]),
+        parent_version_id: [...this.versions.values()].filter((entry) => entry.workspace_id === values[0] && entry.domain_id === values[1]).at(-1)?.version_id ?? null,
       };
       if (!this.domains.has(key(row.workspace_id, row.domain_id))) {
         throw new Error('FOREIGN KEY constraint failed: domain_versions.domain');

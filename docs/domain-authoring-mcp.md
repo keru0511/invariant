@@ -11,7 +11,7 @@ Conversation entries contain `id`, `role` (`user` or `assistant`), and `content`
 The base must be the domain's current head. Membership is checked before model
 access or the external provider call. Configure the provider using
 [the provider environment settings](conversation-provider.md); D1 needs all
-three migrations, including `0003_domain_proposals.sql`.
+four migrations, including `0004_content_addressed_domains.sql`.
 
 ## Review protocol
 
@@ -82,3 +82,20 @@ D1 test is part of ordinary tests. Live-provider quality, production smoke,
 provider rate/cost controls, proposal expiration/cleanup and a dedicated review
 UI remain separate work. Proposals retain referenced conversation excerpts;
 apply appropriate retention/access policies before production use.
+
+## 内容アドレス型保存
+
+新しい提案と公開版では、ルール本体を重複保存せず共有オブジェクトへの参照を保存します。
+履歴IDと内容ハッシュは区別し、公開時に親版を記録します。
+旧形式の読み取りも維持します。詳細は[ドメイン版管理](domain-version-storage.md)を参照してください。
+
+## 既存の期待値とAIが追加した例の区別
+
+提案のreview.coverageには、既存例の件数、新たに提案された例の件数、既存例がない関数を記録します。
+0件はemptyであり、テスト成功として扱いません。新しい例がすべて通っても、同じ提案を作ったAI自身の例なので独立した正解の証明にはなりません。
+
+既存例と矛盾する変更は、提案の検証で拒否されます。比較用の既存期待値は、候補が書いた期待値で置き換えません。
+coverageもレビューのダイジェストに含まれ、人が確認する内容と結び付きます。
+
+この仕組みは事実の真偽や網羅性を証明しません。現在のPatchには既存例を変更/削除する操作がないため、
+正当な仕様変更でも過去の期待値に反すれば拒否されます。期待値の変更を伴う承認付き移行は別途設計が必要です。

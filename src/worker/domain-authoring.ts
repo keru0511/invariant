@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { generateValidatedDomainPatch, type ConversationPatchProvider } from '../domain/conversation-patch';
 import type { DomainPatchModel } from '../domain/patch';
+import { assessProposalCoverage } from '../domain/proposal-coverage';
 import { D1ProposalRepository, ProposalError, type ProposalRepository } from '../persistence/domain-proposals';
 import { WorkspaceAccessError } from '../persistence/workspace-access';
 import { createOpenAICompatibleProviderFromEnv } from '../provider';
@@ -59,6 +60,7 @@ export async function proposeDomain(
   input: z.infer<typeof proposeInputSchema>, principal: AccessPrincipal, dependencies: AuthoringDependencies,
 ) {
   try {
+    input = proposeInputSchema.parse(input);
     // Authorize and load before calling the paid/external provider.
     const workspace = await dependencies.repository.forPrincipal(principal, input.workspace);
     const record = await workspace.loadVersion({ domainId: input.domain, versionId: input.baseVersion });
@@ -91,6 +93,7 @@ export async function proposeDomain(
       sources: input.conversation.filter((turn) => generated.operationEvidence
         .some((evidence) => evidence.sourceReferences.includes(turn.id))),
       unknowns: candidate.unknowns, conflicts: candidate.conflicts,
+      coverage: assessProposalCoverage(base, candidate),
       warning: 'Source references and structural validation do not prove semantic correctness. Review every operation before confirming.',
     };
     const reviewDigest = await digest(review);

@@ -1,3 +1,5 @@
+import { isDomainInputPath, inputPathsOverlap } from './input-path';
+import { parseJsonValue as parseJsonSnapshot, DecisionValidationError } from './decision-context';
 /**
  * Runtime-validated, copy-on-write Domain Patch operations.
  *
@@ -198,29 +200,11 @@ function nonEmptyString(value: unknown, path: string): DomainPatchResult<string>
 }
 
 function parseJsonValue(value: unknown, path: string): DomainPatchResult<DomainJsonValue> {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return success(value);
-  if (typeof value === 'number') {
-    return Number.isFinite(value)
-      ? success(value)
-      : failure(patchError('INVALID_PATCH', path, 'Expected a finite JSON number.'));
+  try { return success(parseJsonSnapshot(value, path)); }
+  catch (error) {
+    return failure(patchError('INVALID_PATCH', error instanceof DecisionValidationError ? error.path : path,
+      'Expected a finite, acyclic, depth-bounded plain JSON value.'));
   }
-  if (Array.isArray(value)) {
-    const parsed: DomainJsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const item = parseJsonValue(value[index], path + '[' + index + ']');
-      if (isFailure(item)) return item;
-      parsed.push(item.value);
-    }
-    return success(Object.freeze(parsed));
-  }
-  if (!isRecord(value)) return failure(patchError('INVALID_PATCH', path, 'Expected a JSON value.'));
-  const parsed: Record<string, DomainJsonValue> = {};
-  for (const key of Object.keys(value).sort()) {
-    const item = parseJsonValue(value[key], path + '.' + key);
-    if (isFailure(item)) return item;
-    parsed[key] = item.value;
-  }
-  return success(Object.freeze(parsed));
 }
 
 function parseProvenance(value: unknown, path: string): DomainPatchResult<DomainPatchProvenance> {
@@ -253,7 +237,9 @@ function parseInputDefinitions(value: unknown, path: string): DomainPatchResult<
     if (Object.keys(item).some((key) => !allowed.has(key))) return failure(patchError('INVALID_PATCH', path + '[' + index + ']', 'Unsupported input definition field.'));
     const inputPath = nonEmptyString(item.path, path + '[' + index + '].path');
     if (isFailure(inputPath)) return inputPath;
+    if (!isDomainInputPath(inputPath.value)) return failure(patchError('INVALID_PATCH', path + '[' + index + '].path', 'Expected a dotted identifier path.'));
     if (seen.has(inputPath.value)) return failure(patchError('DUPLICATE_ID', path + '[' + index + '].path', 'Duplicate input path.'));
+    if ([...seen].some((existing) => inputPathsOverlap(existing, inputPath.value))) return failure(patchError('INVALID_SCOPE', path + '[' + index + '].path', 'A field cannot be both a scalar leaf and an object parent.'));
     if (item.type !== 'boolean' && item.type !== 'number' && item.type !== 'string') return failure(patchError('INVALID_PATCH', path + '[' + index + '].type', 'Unsupported input type.'));
     if (typeof item.required !== 'boolean') return failure(patchError('INVALID_PATCH', path + '[' + index + '].required', 'Expected a boolean.'));
     seen.add(inputPath.value);
@@ -506,6 +492,16 @@ function finalValidate(candidate: DomainPatchModel): DomainPatchResult<DomainPat
     if (isFailure(examples)) return examples;
   }
   return success(deepFreeze({ ...candidate, domain: parsedDomain.value }));
+}
+
+/** Validate a persisted authoring snapshot without applying or inventing edits. */
+export function parseDomainModel(value: unknown): DomainPatchResult<DomainPatchModel> {
+  if (!isRecord(value) || value.kind !== DOMAIN_MODEL_KIND || value.contractVersion !== DOMAIN_CONTRACT_VERSION
+    || !['types', 'examples', 'unknowns', 'conflicts'].every((key) => Array.isArray(value[key]))) {
+    return failure(patchError('INVALID_FINAL_MODEL', '$', 'Expected a complete versioned Domain model.'));
+  }
+  const normalized = normalizeBase(value);
+  return isFailure(normalized) ? normalized : finalValidate(normalized.value);
 }
 
 /** Apply a validated patch atomically. The input model is never mutated. */

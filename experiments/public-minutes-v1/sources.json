@@ -1,0 +1,100 @@
+{
+  "sources": [
+    {
+      "id": "2025-2nd-session",
+      "source_url": "https://www.digital.go.jp/policies/assessment/2025-2nd-session",
+      "retrieved_at_utc": "2026-10-02T07:15:40.693029+00:00",
+      "raw_html_sha256": "c5f1b36ced844235fb8d0178de5f955a947dda8685f0341a78235ddf76d08acb",
+      "license_url": "https://www.digital.go.jp/resources/open_data/public_data_license_v1.0",
+      "copyright_policy_url": "https://www.digital.go.jp/copyright-policy"
+    },
+    {
+      "id": "2025-4th-session",
+      "source_url": "https://www.digital.go.jp/policies/assessment/2025-4th-session",
+      "retrieved_at_utc": "2026-10-02T07:15:47.220615+00:00",
+      "raw_html_sha256": "0e4a733bb78ee606796d1ec546e3ed3447e1551669b24fc22485e030319ab24f",
+      "license_url": "https://www.digital.go.jp/resources/open_data/public_data_license_v1.0",
+      "copyright_policy_url": "https://www.digital.go.jp/copyright-policy"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "JP01",
+      "source_id": "2025-2nd-session",
+      "meeting_date": "2025-05-23",
+      "position": {
+        "block_start_0based": 24,
+        "block_end_0based_inclusive": 24,
+        "xpath_start": "/html/body/main/article/div[2]/p[5]",
+        "xpath_end": "/html/body/main/article/div[2]/p[5]",
+        "line_start_0based": 0,
+        "line_end_0based_exclusive": 20
+      },
+      "text_sha256": "2e88f780cc74f880ea497a5fd3af3829fe3db82d93a45342d96d44d91b031294"
+    },
+    {
+      "case_id": "JP02",
+      "source_id": "2025-2nd-session",
+      "meeting_date": "2025-05-23",
+      "position": {
+        "block_start_0based": 26,
+        "block_end_0based_inclusive": 26,
+        "xpath_start": "/html/body/main/article/div[2]/p[6]",
+        "xpath_end": "/html/body/main/article/div[2]/p[6]",
+        "line_start_0based": 0,
+        "line_end_0based_exclusive": 24
+      },
+      "text_sha256": "45f6afef55e0db7f9d2db4fa07a8d1ed1f63bf16e18cdf070440408eeabd2ea8"
+    },
+    {
+      "case_id": "JP03",
+      "source_id": "2025-2nd-session",
+      "meeting_date": "2025-05-23",
+      "position": {
+        "block_start_0based": 26,
+        "block_end_0based_inclusive": 26,
+        "xpath_start": "/html/body/main/article/div[2]/p[6]",
+        "xpath_end": "/html/body/main/article/div[2]/p[6]",
+        "line_start_0based": 24,
+        "line_end_0based_exclusive": 36
+      },
+      "text_sha256": "48cd63f1c70c9ce7971bf6100b0def37271c5bd9c1eeea50536b8fb0f14b8738"
+    },
+    {
+      "case_id": "JP04",
+      "source_id": "2025-4th-session",
+      "meeting_date": "2025-08-04",
+      "position": {
+        "block_start_0based": 58,
+        "block_end_0based_inclusive": 64,
+        "xpath_start": "/html/body/main/article/div[2]/p[39]",
+        "xpath_end": "/html/body/main/article/div[2]/p[45]"
+      },
+      "text_sha256": "42a08547ee5ac48351f73a0e7d21a1739ebec129b34fc57dc333eb4cfe89f9df"
+    },
+    {
+      "case_id": "JP05",
+      "source_id": "2025-4th-session",
+      "meeting_date": "2025-08-04",
+      "position": {
+        "block_start_0based": 66,
+        "block_end_0based_inclusive": 69,
+        "xpath_start": "/html/body/main/article/div[2]/p[46]",
+        "xpath_end": "/html/body/main/article/div[2]/p[49]"
+      },
+      "text_sha256": "5e011ef83a803306abd6f98561884f722aa441ea4a9ac0ac735b5ce5c20bee75"
+    },
+    {
+      "case_id": "JP06",
+      "source_id": "2025-4th-session",
+      "meeting_date": "2025-08-04",
+      "position": {
+        "block_start_0based": 73,
+        "block_end_0based_inclusive": 80,
+        "xpath_start": "/html/body/main/article/div[2]/p[53]",
+        "xpath_end": "/html/body/main/article/div[2]/p[60]"
+      },
+      "text_sha256": "afed71e99ae399d46a12622a6ceeba2f1b4e0750040dd93ba56ed2b268f7b90c"
+    }
+  ]
+}

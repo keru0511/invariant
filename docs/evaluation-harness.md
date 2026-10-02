@@ -37,3 +37,9 @@ npm test
 
 No paid or live model call is part of the normal test suite. Credential-backed
 integration calls remain an explicit future action outside this PR.
+
+## 保存データの境界
+
+保存記録の読み込み時にも状態、スコアの型/内部整合性、秘匿済みツール根拠の形を検査します。
+読み込んだ記録と再採点の結果は不変のコピーです。呼び出し元のオブジェクトを凍結しません。
+形が正しいスコアであっても、その正誤は別問題なので、再採点ではfixtureと保存回答から計算し直します。

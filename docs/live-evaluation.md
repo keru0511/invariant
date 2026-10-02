@@ -1,3 +1,9 @@
+# 旧 live-v0 の位置づけ
+
+この実行系は接続・保存・再採点の動作確認用です。チェックイン済みの設定では質問と評価する関数の対応が一致しておらず、モデル自身による関数選択も行いません。通常側へ提示されない事実・制約IDを採点に使う問題もあります。**この設定の正答率差をInvariantの精度改善の証拠として扱わないでください。**
+
+正式な比較実験では、同じ意味の自然言語規則と実行可能な規則を揃え、正解をモデルに渡さず、モデル自身が選んだ引数と最終回答を記録します。詳細は [実証実験の設計](empirical-experiment.md) を参照してください。旧機能の通信テストが成功しても、実証実験を実施済みとは扱いません。
+
 # Live v0 evaluation
 
 The live runner compares the two #15 conditions over the versioned
@@ -66,3 +72,27 @@ the provider, MCP endpoint, filesystem, clock, or network.
 
 No live credentials, deployment, or paid provider call is part of normal CI or
 the issue #29 verification run.
+
+## 応答を誤って成功としないための検証
+
+評価用クライアントも、生成打ち切り・拒否・複数候補・JSON回答で要求していないtool_callsを受理しません。
+finish_reasonを返すproviderではstopのみを受理します。互換providerがこの欄を省略した場合は従来どおり受理するため、終了理由までは検証できません。
+タイムアウト後に到着した本文は、内容が正しいJSONでも成功にしません。次の通信失敗に前回の記録を流用しません。
+
+MCP側は現在の2026-07-28プロトコルとメタデータを使い、実サーバーハンドラーとの接続もテストします。
+JSON-RPCの応答ID、tool error、本文の形を検査し、エラーを評価根拠に流しません。
+これらの通常テストは通信を差し替え、実providerや課金APIを呼びません。
+
+## 保存記録の再集計
+
+保存JSONの自己申告scoreを集計の根拠にはしません。宣言したfixtureの正解と保存responseから再採点します。
+試行ID・状態・件数の型を検査し、重複試行、対象外fixture、重複fixture定義を拒否します。
+読み込んだ記録は不変にします。rawOutputは監査資料であり、その文字列を命令として実行しません。
+
+passRateは採点できた試行だけが分母です。通信エラーが多い場合の過大評価を避けるため、
+overallPassRate（正答/記録された全試行）とscoringCoverage（採点済/記録された全試行）も表示します。
+渡されなかった記録の存在までは検出できません。指標は記録された試行の範囲に限定され、全体性能の保証ではありません。
+
+評価回答のJSONも閉じた契約として扱い、completedではstatus/answer/facts/constraints、
+missing/timeoutではstatus/reason以外の欄を拒否します。未採点の説明欄に追加主張があっても、全体をcorrectとは認定しません。
+自由文そのものの真偽判定を実装したわけではなく、この評価形式の外側は採点対象外です。

@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:public-minutes-pilot:schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_id",
+    "case_id",
+    "candidates"
+  ],
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "action",
+          "evidence",
+          "events",
+          "final_status",
+          "owner",
+          "deadline",
+          "uncertainty"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "paragraph_id",
+                "quote"
+              ],
+              "properties": {
+                "paragraph_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "minItems": 1
+          },
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "evidence"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "proposal",
+                    "request",
+                    "acceptance",
+                    "decision",
+                    "hold",
+                    "withdrawal",
+                    "completion",
+                    "unclear"
+                  ]
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "paragraph_id",
+                      "quote"
+                    ],
+                    "properties": {
+                      "paragraph_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "quote": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          "final_status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "requested",
+              "committed",
+              "on_hold",
+              "withdrawn",
+              "completed",
+              "unresolved"
+            ]
+          },
+          "owner": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "basis",
+              "evidence"
+            ],
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "accepted_self",
+                  "explicitly_assigned",
+                  "merely_addressed",
+                  "unstated",
+                  "ambiguous"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "paragraph_id",
+                    "quote"
+                  ],
+                  "properties": {
+                    "paragraph_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "quote": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "deadline": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "raw_text",
+              "normalized_date",
+              "modality",
+              "basis",
+              "evidence"
+            ],
+            "properties": {
+              "raw_text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              },
+              "normalized_date": {
+                "type": "null"
+              },
+              "modality": {
+                "type": "string",
+                "enum": [
+                  "firm",
+                  "target",
+                  "unspecified"
+                ]
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "explicit_absolute",
+                  "explicit_relative",
+                  "unstated",
+                  "ambiguous"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "paragraph_id",
+                    "quote"
+                  ],
+                  "properties": {
+                    "paragraph_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "quote": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "uncertainty": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,12 +9,14 @@
 import {
   applyDomainPatch,
   parseDomainPatch,
+  parseDomainModel,
   type DomainPatch,
   type DomainPatchError,
   type DomainPatchModel,
   type DomainUnknown,
 } from './patch';
 import type { DomainParseError } from './runtime';
+import { parseJsonValue, deepFreeze, stableJsonStringify, type JsonValue } from './decision-context';
 
 export interface ConversationTurn {
   readonly id: string;
@@ -91,7 +93,7 @@ export interface ConversationPatchClock {
 
 export const MAX_CONVERSATION_PATCH_PROVIDER_ATTEMPTS = 2 as const;
 
-export const CONVERSATION_PATCH_OUTPUT_SCHEMA = Object.freeze({
+export const CONVERSATION_PATCH_OUTPUT_SCHEMA = deepFreeze({
   type: 'object',
   additionalProperties: false,
   required: ['patch', 'operationEvidence'],
@@ -398,8 +400,24 @@ export async function generateValidatedDomainPatch(
   provider: ConversationPatchProvider,
   options: { readonly timeoutMs?: number; readonly clock?: ConversationPatchClock; readonly signal?: AbortSignal } = {},
 ): Promise<ConversationPatchResult> {
+  // Capture knowledge and evidence before the first await. Readonly types do
+  // not protect shared references from a caller or an injected provider.
+  try {
+    input = parseJsonValue({ conversation: input.conversation, currentDomain: input.currentDomain,
+      currentDomainVersion: input.currentDomainVersion, unresolvedItems: input.unresolvedItems }, '$') as unknown as ConversationToValidatedPatchInput;
+  } catch {
+    return failure('INVALID_INPUT', '$', 'Input must be a finite, acyclic JSON snapshot.');
+  }
   const inputFailure = validateInput(input);
   if (inputFailure) return inputFailure;
+  const base = parseDomainModel(dryApplyBase(input));
+  if (!base.ok) return failure('INVALID_INPUT', '$.currentDomain', 'Current Domain must be valid before generation.');
+  const canonicalUnknowns = (items: readonly DomainUnknown[]) => stableJsonStringify(
+    [...items].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) as unknown as JsonValue,
+  );
+  if (canonicalUnknowns(base.value.unknowns) !== canonicalUnknowns(input.unresolvedItems)) {
+    return failure('INVALID_INPUT', '$.unresolvedItems', 'Unresolved items must match the supplied Domain snapshot.');
+  }
   const timeoutMs = options.timeoutMs ?? 1_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return failure('CONFIG_ERROR', '$.timeoutMs', 'timeoutMs must be a positive finite number.');
   if (options.clock !== undefined && !isClock(options.clock)) return failure('CONFIG_ERROR', '$.clock', 'clock must provide setTimeout and clearTimeout functions.');

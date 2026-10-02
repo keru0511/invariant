@@ -14,10 +14,10 @@ snapshots without trusting caller-provided diff metadata.
   changes with `before` and `after` values.
 - `not_comparable`: the domain versions differ.
 
-Facts compare by value, constraints, unknowns, and alternatives by description;
-objectives by weight; and out-of-scope entries by set membership. IDs are sorted
+Facts compare by value and description, constraints, unknowns, and alternatives by description;
+objectives by weight and description; and out-of-scope entries by set membership. IDs are sorted
 within each category and categories have a stable order, so repeated comparisons
-produce byte-identical JSON. Missing entities use `null` as their side of a diff.
+produce byte-identical JSON. Missing entities use `null` as their side of a diff. When both values are null, `beforePresent` and `afterPresent` distinguish a missing entity from a recorded null value. Description-only changes use `fact_description` or `objective_description`.
 Unresolved, ambiguous, conflict, and error evaluation statuses, results, traces,
 and explicit null recommendations remain unchanged in the records. The comparison
 does not parse evaluation messages: result/trace/evaluation drift is distinct from

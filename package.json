@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:calculation-mutations": "python3 scripts/calculation-mutations.py",
     "eval:live": "vite-node --script scripts/live-evaluation.ts",
     "eval:live:smoke": "vite-node --script scripts/live-evaluation.ts --trials 1",
     "eval:live:large": "vite-node --script scripts/live-evaluation.ts --trials 10",
@@ -18,7 +19,8 @@
     "pr:create": "node scripts/pr-create.mjs",
     "lab:setup": "node scripts/local-lab.mjs setup",
     "lab:start": "node scripts/local-lab.mjs start",
-    "lab:check": "node scripts/local-lab.mjs check"
+    "lab:check": "node scripts/local-lab.mjs check",
+    "eval:empirical:prepare": "node scripts/empirical-prepare.mjs"
   },
   "devDependencies": {
     "@mizchi/actrun": "0.32.0",

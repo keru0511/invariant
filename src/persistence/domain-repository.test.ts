@@ -141,16 +141,18 @@ describe('D1 domain persistence', () => {
         workspaceId: 'workspace-a',
         domainId: 'orders',
         domainName: 'Customer Orders',
-        versionId: 'v1',
+        versionId: 'v2',
+        isCurrentVersion: true,
+        description: 'Literal %_ marker',
         functionId: 'function.domain-v0.member-age',
         functionName: 'member-age',
       }),
       expect.objectContaining({
         workspaceId: 'workspace-a',
-        versionId: 'v2',
+        versionId: 'v1',
+        isCurrentVersion: false,
         functionId: 'function.domain-v0.member-age',
         functionName: 'member-age',
-        description: 'Literal %_ marker',
       }),
     ]);
 

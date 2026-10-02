@@ -1,3 +1,4 @@
+import { DomainObjectReader, packModel, objectStatements } from './domain-objects';
 import type { D1DatabaseLike } from './domain-repository';
 import type { DomainPatchModel } from '../domain/patch';
 
@@ -51,18 +52,19 @@ export class D1ProposalRepository implements ProposalRepository {
         AND v.domain_id = p.domain_id AND v.version_id = p.version_id AND v.proposal_id = p.proposal_id
       WHERE p.workspace_id = ? AND p.domain_id = ? AND p.version_id = ?`)
       .bind(scope.workspaceId, scope.domainId, versionId).first<{ authoring_json: string }>();
-    return row ? JSON.parse(row.authoring_json) as DomainPatchModel : null;
+    return row ? new DomainObjectReader(this.db, scope).readModel(row.authoring_json, versionId) : null;
   }
 
   async save(scope: ProposalScope, proposal: StoredProposal): Promise<void> {
-    await this.db.prepare(`INSERT INTO domain_proposals
+    const packed = await packModel(proposal.candidate);
+    await this.db.batch([...objectStatements(this.db, scope, packed.objects), this.db.prepare(`INSERT INTO domain_proposals
       (workspace_id, domain_id, proposal_id, principal_id, base_version, version_id,
        review_digest, review_json, model_json, authoring_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(scope.workspaceId, scope.domainId, proposal.proposalId, scope.principalId,
         proposal.baseVersion, proposal.versionId, proposal.reviewDigest,
-        JSON.stringify(proposal.review), JSON.stringify(proposal.candidate.domain),
-        JSON.stringify(proposal.candidate), new Date().toISOString()).run();
+        JSON.stringify(proposal.review), packed.catalogPointer,
+        packed.modelPointer, new Date().toISOString())]);
   }
 
   async commit(scope: ProposalScope, proposalId: string, reviewDigest: string): Promise<string> {
@@ -76,8 +78,8 @@ export class D1ProposalRepository implements ProposalRepository {
     // advances the head in the same transaction; two competing proposals cannot
     // both publish on the same base. A replay is a no-op, even after head advances.
     await this.db.prepare(`INSERT INTO domain_versions
-      (workspace_id, domain_id, version_id, model_json, published_at, proposal_id)
-      SELECT p.workspace_id, p.domain_id, p.version_id, p.model_json, ?, p.proposal_id
+      (workspace_id, domain_id, version_id, model_json, published_at, proposal_id, parent_version_id)
+      SELECT p.workspace_id, p.domain_id, p.version_id, p.model_json, ?, p.proposal_id, p.base_version
       FROM domain_proposals p
       INNER JOIN domain_heads h ON h.workspace_id = p.workspace_id AND h.domain_id = p.domain_id
       WHERE p.workspace_id = ? AND p.domain_id = ? AND p.principal_id = ?

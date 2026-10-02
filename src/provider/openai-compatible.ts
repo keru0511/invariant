@@ -102,14 +102,23 @@ function extractStructuredOutput(payload: unknown): unknown {
     throw providerError('provider', 'Provider returned an error response.');
   }
   const choices = response.choices;
-  if (!Array.isArray(choices) || choices.length === 0 || choices[0] === null || typeof choices[0] !== 'object') {
+  if (!Array.isArray(choices) || choices.length !== 1 || choices[0] === null || typeof choices[0] !== 'object') {
     throw providerError('malformed-output', 'Provider response did not contain a choice.');
   }
-  const message = (choices[0] as Record<string, unknown>).message;
+  const choice = choices[0] as Record<string, unknown>;
+  // Some compatible providers omit finish_reason. If supplied, it must confirm
+  // completion; valid JSON alone cannot establish that generation finished.
+  if (choice.finish_reason !== undefined && choice.finish_reason !== 'stop') {
+    throw providerError('malformed-output', 'Provider generation did not finish normally.');
+  }
+  const message = choice.message;
   if (message === null || typeof message !== 'object' || Array.isArray(message)) {
     throw providerError('malformed-output', 'Provider response did not contain a message.');
   }
   const messageRecord = message as Record<string, unknown>;
+  if (messageRecord.refusal !== undefined && messageRecord.refusal !== null && messageRecord.refusal !== '') {
+    throw providerError('malformed-output', 'Provider refused to generate a candidate.');
+  }
   if (messageRecord.parsed !== undefined) return messageRecord.parsed;
   const content = messageRecord.content;
   if (typeof content !== 'string' || content.trim().length === 0) {
@@ -183,6 +192,9 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
         if (callerCancelled) {
           throw providerError('cancelled', 'Provider request was cancelled.');
         }
+        if (timedOut || controller.signal.aborted) {
+          throw providerError('timeout', 'Provider request timed out.');
+        }
         if (!response.ok) {
           throw providerError('provider', 'Provider returned a non-success HTTP status.', response.status);
         }
@@ -190,8 +202,14 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderC
         try {
           payload = await response.json();
         } catch (error) {
+          if (callerCancelled) throw providerError('cancelled', 'Provider request was cancelled.');
+          if (timedOut || controller.signal.aborted || isAbortError(error)) throw providerError('timeout', 'Provider response body timed out.');
           throw providerError('malformed-output', 'Provider response was not valid JSON.');
         }
+        // Fetch completion only means headers arrived. A slow or cancellation-
+        // ignoring body reader must not turn a late candidate into success.
+        if (callerCancelled) throw providerError('cancelled', 'Provider request was cancelled.');
+        if (timedOut || controller.signal.aborted) throw providerError('timeout', 'Provider response body timed out.');
         return extractStructuredOutput(payload);
       } finally {
         clearTimeout(timer);

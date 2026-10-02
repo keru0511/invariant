@@ -243,3 +243,95 @@ describe("live evaluation configuration and recording", () => {
     expect(report.errors).toHaveLength(2);
   });
 });
+
+describe('live report input integrity', () => {
+  const fixture = fixtureById('evaluation-v0.threshold');
+  async function artifact() {
+    const record = await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture, 'allow') });
+    return recordLiveTrial('llm-only', fixture, 1, record);
+  }
+  it('recomputes a saved score rather than trusting a claimed success', async () => {
+    const saved = await artifact();
+    const forged = { ...saved, score: { ...saved.score!, label: 'correct' as const, points: 1 as const, passed: true } };
+    const report = aggregateLiveReport([forged], [fixture]);
+    expect(report.conditions['llm-only'].passed).toBe(0);
+    expect(report.conditions['llm-only'].labels.wrong).toBe(1);
+  });
+  it('rejects duplicate trials rather than counting the same result twice', async () => {
+    const saved = await artifact();
+    expect(() => aggregateLiveReport([saved, saved], [fixture])).toThrow();
+  });
+  it('rejects trials for fixtures outside the declared benchmark', async () => {
+    const saved = await artifact();
+    expect(() => aggregateLiveReport([saved], [])).toThrow();
+  });
+  it('keeps errors in the overall denominator even when every scored response passes', async () => {
+    const record = await llmOnlyAdapter.run(fixture, { complete: async () => responseFor(fixture) });
+    const report = aggregateLiveReport([
+      recordLiveTrial('llm-only', fixture, 1, record),
+      recordLiveError('llm-only', fixture, 2, new Error('Synthetic failure')),
+    ], [fixture]);
+    expect(report.conditions['llm-only']).toMatchObject({ passRate: 1, overallPassRate: 0.5, scoringCoverage: 0.5, errors: 1 });
+    expect(renderLiveReportMarkdown(report)).toContain('Pass/all trials');
+  });
+});
+
+describe('saved live artifact validation', () => {
+  const fixture = OFFLINE_EVALUATION_FIXTURES[0];
+  const valid = recordLiveError('llm-only', fixture, 1, new Error('Synthetic failure'));
+  it.each([
+    { trialNumber: -1 }, { trialNumber: 1.5 }, { trialNumber: 9007199254740992 },
+    { status: 'success' }, { family: 'unregistered' }, { fixtureVersion: 'future-version' },
+    { toolCalls: {} }, { error: null }, { request: { adapter: 'llm-invariant', prompt: 'wrong condition' } },
+  ])('rejects malformed identity, state, or capture fields: %j', (change) => {
+    expect(() => deserializeLiveTrial(JSON.stringify({ ...valid, ...change }))).toThrow();
+  });
+  it('returns an immutable record so saved evidence cannot drift after validation', () => {
+    const result = deserializeLiveTrial(serializeLiveTrial(valid));
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.error)).toBe(true);
+  });
+  it('rejects duplicate benchmark definitions', () => {
+    expect(() => aggregateLiveReport([valid], [fixture, fixture])).toThrow();
+  });
+});
+
+it('snapshots the run plan and fixtures before asynchronous model setup', async () => {
+  const fixture = structuredClone(fixtureById('evaluation-v0.threshold'));
+  const fixtures = [fixture];
+  const response = responseFor(fixture);
+  const config = structuredClone(resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG, { trialsPerCase: 1 }));
+  const artifacts = await runLiveEvaluation(config, fixtures, async () => {
+    fixtures.length = 0;
+    (fixture.expected as { answer: string | null }).answer = 'allow';
+    (config as { trialsPerCase: number }).trialsPerCase = 2;
+    return new FakeModel(response);
+  }, () => new RecordedInvariantToolClient());
+  expect(artifacts).toHaveLength(2);
+  expect(artifacts.every((entry) => entry.score?.label === 'correct')).toBe(true);
+});
+
+it('retains special JSON keys when redacting recorded evidence', () => {
+  const input = JSON.parse('{"__proto__":{"evidence":"original"},"api_key":"synthetic-secret"}');
+  const output = redactForRecording(input);
+  expect(Object.hasOwn(output as object, '__proto__')).toBe(true);
+  expect(JSON.parse(JSON.stringify(output))).toEqual({ ...JSON.parse('{"__proto__":{"evidence":"original"}}'), api_key: '[REDACTED]' });
+});
+
+it('rejects malformed fixtures and unsafe trial counts before creating a provider', async () => {
+  let created = 0;
+  const config = resolveLiveEvaluationConfig(DEFAULT_LIVE_EVALUATION_CONFIG);
+  const invalid = { ...OFFLINE_EVALUATION_FIXTURES[0], expected: { ...OFFLINE_EVALUATION_FIXTURES[0].expected, requiredFacts: 'not an array' } };
+  await expect(runLiveEvaluation(config, [invalid as unknown as EvaluationFixture], () => { created++; return new FakeModel({}); }, () => new RecordedInvariantToolClient())).rejects.toThrow();
+  await expect(runLiveEvaluation({ ...config, trialsPerCase: Number.MAX_SAFE_INTEGER + 1 }, [], () => { created++; return new FakeModel({}); }, () => new RecordedInvariantToolClient())).rejects.toThrow();
+  expect(created).toBe(0);
+});
+
+it('does not treat inherited object keys as configured case targets', async () => {
+  const fixture = { ...OFFLINE_EVALUATION_FIXTURES[0], id: 'toString' };
+  const config = resolveLiveEvaluationConfig({ ...DEFAULT_LIVE_EVALUATION_CONFIG, caseTargets: undefined });
+  const client = new RecordedInvariantToolClient();
+  const artifacts = await runLiveEvaluation(config, [fixture], () => new FakeModel(responseFor(fixture)), () => client);
+  expect(artifacts.every((entry) => entry.status === 'completed')).toBe(true);
+  expect(client.requests[0]).toMatchObject({ domain: config.domain, function: config.function });
+});

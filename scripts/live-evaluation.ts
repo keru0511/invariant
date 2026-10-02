@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { parseJsonValue } from '../src/domain/decision-context';
 import {
   aggregateLiveReport,
   applyLiveEvaluationCliOptions,
@@ -46,16 +47,21 @@ const USAGE = [
 ].join("\n") + "\n";
 
 export const CF_ACCESS_JWT_ASSERTION_HEADER = "Cf-Access-Jwt-Assertion";
+export const LIVE_MCP_PROTOCOL_VERSION = '2026-07-28';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function providerContent(payload: unknown): unknown {
-  if (!isRecord(payload) || !Array.isArray(payload.choices) || payload.choices.length === 0) return payload;
+  if (!isRecord(payload) || !Array.isArray(payload.choices) || payload.choices.length !== 1) throw new Error('Provider must return exactly one completion.');
+  if (payload.error !== undefined) throw new Error('Provider returned an error envelope.');
   const first = payload.choices[0];
-  if (!isRecord(first) || !isRecord(first.message)) return payload;
+  if (!isRecord(first) || !isRecord(first.message)) throw new Error('Provider completion is malformed.');
+  if (first.finish_reason !== undefined && first.finish_reason !== 'stop') throw new Error('Provider completion did not finish normally.');
   const message = first.message;
+  if (message.refusal !== undefined && message.refusal !== null && message.refusal !== '') throw new Error('Provider refused the completion.');
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) throw new Error('Unexpected tool calls in a JSON-only evaluation response.');
   if (typeof message.content === "string") {
     let content = message.content.trim();
     const fence = String.fromCharCode(96).repeat(3);
@@ -70,17 +76,7 @@ function providerContent(payload: unknown): unknown {
       return message.content;
     }
   }
-  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-    const call = message.tool_calls[0];
-    if (isRecord(call) && isRecord(call.function) && typeof call.function.arguments === "string") {
-      try {
-        return JSON.parse(call.function.arguments);
-      } catch {
-        return call.function.arguments;
-      }
-    }
-  }
-  return payload;
+  throw new Error('Provider completion has no textual answer.');
 }
 
 function providerToolCalls(payload: unknown): readonly unknown[] {
@@ -91,16 +87,17 @@ function providerToolCalls(payload: unknown): readonly unknown[] {
 }
 
 function mcpToolResult(payload: unknown): unknown {
-  if (!isRecord(payload)) return payload;
-  if ("error" in payload) return payload;
+  if (!isRecord(payload)) throw new Error('Invariant MCP response is malformed.');
+  if ("error" in payload) throw new Error('Invariant MCP returned a JSON-RPC error.');
   const result = payload.result;
-  if (!isRecord(result) || !Array.isArray(result.content) || result.content.length === 0) return payload;
+  if (!isRecord(result) || result.isError === true) throw new Error('Invariant MCP returned a tool error.');
+  if (!Array.isArray(result.content) || result.content.length !== 1) throw new Error('Invariant MCP response must contain one result.');
   const first = result.content[0];
-  if (!isRecord(first) || typeof first.text !== "string") return payload;
+  if (!isRecord(first) || first.type !== 'text' || typeof first.text !== "string") throw new Error('Invariant MCP result is not text.');
   try {
     return JSON.parse(first.text);
   } catch {
-    return first.text;
+    throw new Error('Invariant MCP result is not JSON.');
   }
 }
 
@@ -116,6 +113,8 @@ export class HttpInvariantToolClient implements InvariantToolClient {
   ) {}
 
   async evaluate(request: DomainEvaluateRequest): Promise<unknown> {
+    this.capture = null;
+    request = parseJsonValue(request, '$.toolRequest') as unknown as DomainEvaluateRequest;
     const body = {
       jsonrpc: "2.0",
       id: ++this.requestId,
@@ -123,6 +122,11 @@ export class HttpInvariantToolClient implements InvariantToolClient {
       params: {
         name: "domain.evaluate",
         arguments: request,
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': LIVE_MCP_PROTOCOL_VERSION,
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': { name: 'invariant-live-evaluation', version: '1' },
+        },
       },
     };
     const controller = new AbortController();
@@ -131,19 +135,22 @@ export class HttpInvariantToolClient implements InvariantToolClient {
       const response = await this.fetchImpl(this.config.mcpUrl, {
         method: "POST",
         headers: {
-          Accept: "application/json, text/event-stream",
+          Accept: "application/json",
           "Content-Type": "application/json",
-          "MCP-Protocol-Version": "2025-06-18",
+          "MCP-Protocol-Version": LIVE_MCP_PROTOCOL_VERSION,
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'domain.evaluate',
           [CF_ACCESS_JWT_ASSERTION_HEADER]: this.token,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
       const payload: unknown = await response.json();
+      if (controller.signal.aborted) throw new Error('Invariant MCP request timed out.');
+      if (!isRecord(payload) || payload.jsonrpc !== '2.0' || payload.id !== body.id) throw new Error('Invariant MCP response does not match the request.');
       const toolResponse = mcpToolResult(payload);
       this.capture = { request, response: toolResponse };
       if (!response.ok) throw new Error("Invariant MCP HTTP " + response.status + ".");
-      if (isRecord(payload) && "error" in payload) throw new Error("Invariant MCP returned a JSON-RPC error.");
       return toolResponse;
     } catch (error) {
       if (this.capture === null) {
@@ -165,7 +172,7 @@ export class HttpInvariantToolClient implements InvariantToolClient {
   }
 }
 
-class OpenAICompatibleModel implements CapturingEvaluationModel {
+export class OpenAICompatibleModel implements CapturingEvaluationModel {
   private capture: LiveCallCapture | null = null;
 
   constructor(
@@ -175,6 +182,10 @@ class OpenAICompatibleModel implements CapturingEvaluationModel {
   ) {}
 
   async complete(request: ModelRequest): Promise<unknown> {
+    this.capture = null;
+    request = parseJsonValue({ fixture: request.fixture, adapter: request.adapter, prompt: request.prompt,
+      ...(request.invariantContext === undefined ? {} : { invariantContext: request.invariantContext }),
+    }, '$.modelRequest') as unknown as ModelRequest;
     const context = request.invariantContext === undefined
       ? "No additional invariant context is available."
       : "Authorized Invariant tool result from domain.evaluate. Request and response: " +
@@ -206,6 +217,7 @@ class OpenAICompatibleModel implements CapturingEvaluationModel {
         signal: controller.signal,
       });
       const payload: unknown = await response.json();
+      if (controller.signal.aborted) throw new Error('Provider request timed out.');
       this.capture = {
         request: {
           adapter: request.adapter,
