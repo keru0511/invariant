@@ -53,8 +53,8 @@ def main():
     scores, blinded = [], []
     for index, item in enumerate(trials):
         case_id, condition = item["caseId"], item["condition"]
-        key = item["recordKey"]
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", key):
+        record_key = item["recordKey"]
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", record_key):
             raise ValueError("Unsafe trial record key.")
         case = public[case_id]
         expected = oracle[case_id].get("turnAnswers", [oracle[case_id]["answer"]])
@@ -65,13 +65,13 @@ def main():
                         for i, answer in enumerate(expected)]
         tool_records = []
         if condition == "B":
-            trace_file = RUN / "tool-traces" / (key + ".jsonl")
+            trace_file = RUN / "tool-traces" / (record_key + ".jsonl")
             if options.observations:
                 tool_records = item.get("toolTrace", [])
             elif trace_file.exists():
                 tool_records = [json.loads(line) for line in trace_file.read_text().splitlines() if line.strip()]
             for number, record in enumerate(tool_records, 1):
-                if record.get("trialId") != key or record.get("callNumber") != number or record.get("sourceSha256") != source_hash:
+                if record.get("trialId") != record_key or record.get("callNumber") != number or record.get("sourceSha256") != source_hash:
                     raise ValueError("Tool execution evidence has inconsistent identity or source.")
         evaluations_by_turn = []
         evidence_issues = []
@@ -109,7 +109,7 @@ def main():
                        "programEvidenceIssues": evidence_issues,
                        "fullProseReview": "separate_review_not_scored_here"})
         # This file deliberately has no condition, operational agent IDs or tool traces.
-        blinded.append({"reviewId": "review-" + hashlib.sha256(("blind-v1:" + key).encode()).hexdigest()[:12],
+        blinded.append({"reviewId": "review-" + hashlib.sha256(("blind-v1:" + record_key).encode()).hexdigest()[:12],
                         "caseId": case_id, "ruleText": case["ruleText"], "question": case["question"], "facts": case["facts"],
                         "followupQuestions": case.get("followupQuestions", []),
                         "responses": observed, "expected": oracle[case_id]})
